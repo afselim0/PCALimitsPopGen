@@ -1,5 +1,8 @@
+#%%
+import re
+from concurrent.futures import ProcessPoolExecutor
 import msprime
-import tqdm
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
@@ -43,23 +46,24 @@ def compute_expected_covariance(T, mean_normalize=True):
         G /= (_off_diagonal_mean(T) / 2)
     return G
 
-def simulate_haplotypes(demography, n=100, L=int(1e6),random_seed=42):
-    """Simulate L independent biallelic SNPs by placing a random mutation on a random tree generated from a specified demography
+def _sampling_populations(demography):
+    """Sampleable population names from a demography, in spatial/numeric order."""
+    pops = [pop.name for pop in demography.populations
+            if pop.default_sampling_time in (0, None)]
+    pops.sort(key=lambda name: [int(tok) if tok.isdigit() else tok
+                                 for tok in re.split(r'(\d+)', name)])
+    return pops
 
-    Args:
-        n (int, optional): number of diploid individuals from each population. Defaults to 100. (half of the number of per-population haploid sample size)
-        L (int, optional): Number of SNPs to simulate. Defaults to int(1e5).
-        random_seed (int, optional): Random seed for reproducibility. Defaults to 42.
-    """
-    pops = [pop.name for pop in demography.populations if pop.default_sampling_time == 0]
-    pops.sort()
-    samples_dict = {pop: int(n) for pop in pops}
+
+def _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_progress):
+    """Simulate L independent biallelic SNPs for one chunk (one process/seed)."""
     ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
                                     random_seed=random_seed, num_replicates=L,
                                     sequence_length=1, ploidy=2)
     n_tot = 2*sum(samples_dict.values())
     haplotypes = np.zeros((n_tot, L))
-    for i, ts in tqdm(enumerate(ts_samples)):
+    rng = np.random.default_rng(random_seed)
+    for i, ts in tqdm(enumerate(ts_samples), total=L, disable=not show_progress):
         tree = ts.first()
         nodes, ancestral_branch_lengths = [], []
         for u in tree.nodes():
@@ -69,9 +73,38 @@ def simulate_haplotypes(demography, n=100, L=int(1e6),random_seed=42):
                 ancestral_branch_lengths.append(bl)
         ancestral_branch_lengths = np.array(ancestral_branch_lengths)
         probabilities = ancestral_branch_lengths / np.sum(ancestral_branch_lengths)
-        mutation_node = np.random.choice(nodes, p=probabilities)
+        mutation_node = rng.choice(nodes, p=probabilities)
         haplotypes[np.array(list(tree.leaves(mutation_node))), i] = 1
     return haplotypes
+
+
+def simulate_haplotypes(demography, n=100, L=int(1e6), random_seed=42, n_workers=1):
+    """Simulate L independent biallelic SNPs by placing a random mutation on a random tree generated from a specified demography
+
+    Args:
+        n (int, optional): number of diploid individuals from each population. Defaults to 100. (half of the number of per-population haploid sample size)
+        L (int, optional): Number of SNPs to simulate. Defaults to int(1e5).
+        random_seed (int, optional): Random seed for reproducibility. Defaults to 42.
+        n_workers (int, optional): number of processes to split the L replicates across. Each
+            replicate is an independent coalescent simulation, so this parallelizes with no
+            cross-worker communication; workers use random_seed + worker index. Defaults to 1
+            (serial, same behavior/output as before).
+    """
+    samples_dict = {pop: int(n) for pop in _sampling_populations(demography)}
+
+    if n_workers <= 1:
+        return _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, True)
+
+    n_workers = min(n_workers, L)
+    chunk_sizes = np.diff(np.linspace(0, L, n_workers + 1).astype(int))
+    with ProcessPoolExecutor(max_workers=n_workers) as ex:
+        futures = [
+            ex.submit(_simulate_haplotype_chunk, demography, samples_dict,
+                      int(chunk_L), random_seed + w, w == 0)
+            for w, chunk_L in enumerate(chunk_sizes) if chunk_L > 0
+        ]
+        chunks = [f.result() for f in futures]
+    return np.concatenate(chunks, axis=1)
 
 def compute_pop_coal_times(demography, pops):
     """Mean pairwise coalescence time between (and within) each population."""

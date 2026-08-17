@@ -1,15 +1,17 @@
 #%%
+import sys
 import numpy as np
 import pandas as pd
 import msprime
 from tqdm import tqdm
+sys.path.append('..')
+from utils import compute_pop_coal_times, expand_pop_coal_times
 #%%
 def center_matrix(X):
     """Double-center a matrix: H @ X @ H, with H = I - (1/n) * 11^T."""
     n = X.shape[0]
     H = np.eye(n) - np.ones((n, n)) / n
     return -H @ X @ H
-
 
 def _off_diagonal_mean(M):
     """Mean of M over off-diagonal entries only (excludes the zero diagonal)."""
@@ -55,58 +57,21 @@ class DemographySpectrum:
         self.haplotypes = haplotypes
     
     def compute_pop_coal_times(self):
-        dbg = self.demography.debug()
-        self.pop_coal_times = pd.DataFrame(np.zeros((self.num_pops, self.num_pops)),
-                                           index=self.pops, columns=self.pops)
-        for i,pop1 in enumerate(self.pops):
-            for j,pop2 in enumerate(self.pops):
-                if i>j:
-                    continue
-                elif i == j:
-                    lineags = {pop1: 2}
-                elif i < j:
-                    lineags = {pop1: 1, pop2: 1}
-                mean_coal_time = dbg.mean_coalescence_time(lineages=lineags)
-                self.pop_coal_times.iloc[i, j] = mean_coal_time
-                self.pop_coal_times.iloc[j, i] = mean_coal_time
+        self.pop_coal_times = compute_pop_coal_times(self.demography, self.pops)
         return self.pop_coal_times
 
-    def expand_pop_coal_times(self,samples_dict):  
+    def expand_pop_coal_times(self, samples_dict):
         """Expand the within- and between-population coalescent times to between individuals
 
         Args:
             samples_dict (dict): A dictionary where keys are population names and values are the number of diploid individuals from that population. (each individual contributes 2 haploid samples)
 
         Returns:
-            np.ndarray: a matrix of mean pairwise coalescent times between samples, where the order of samples is determined by the order of populations in self.pops and the number of samples specified in samples_dict.
+            pd.DataFrame: a matrix of mean pairwise coalescent times between samples, where the order of samples is determined by the order of populations in self.pops and the number of samples specified in samples_dict.
         """
-        # Create a full matrix of coalescent times
         if self.pop_coal_times is None:
             self.compute_pop_coal_times()
-        pop_coal_times = self.pop_coal_times
-        assert all(pop in self.pops for pop in samples_dict.keys()), "All populations in samples_dict must be present in self.pops"
-        assert all(isinstance(samples_dict[pop], int) and samples_dict[pop] > 0 for pop in samples_dict.keys()), "All values in samples_dict must be positive integers"
-        n_total = sum(samples_dict[pop] * 2 for pop in self.pops)  # Total number of haploid samples
-        samples_dict_haploid = {pop: samples_dict[pop] * 2 for pop in self.pops}  # Convert to haploid samples
-        full_matrix = np.zeros((n_total, n_total))
-
-        ## Fill in the full matrix with the appropriate coalescent times
-        idx_start_values, idx_start = {}, 0
-        for pop in self.pops:
-            idx_start_values[pop] = idx_start
-            idx_start += samples_dict_haploid[pop]
-        for i, pop1 in enumerate(self.pops):
-            i_start = idx_start_values[pop1]
-            i_end = i_start + samples_dict_haploid[pop1]
-            for j, pop2 in enumerate(self.pops):
-                j_start = idx_start_values[pop2]
-                j_end = j_start + samples_dict_haploid[pop2]
-                full_matrix[i_start:i_end, j_start:j_end] = pop_coal_times.iloc[i, j]
-        # A haploid sample coalesces with itself at time 0
-        np.fill_diagonal(full_matrix, 0)
-
-        sample_labels = [f"{pop}_{k}" for pop in self.pops for k in range(samples_dict_haploid[pop])]
-        return pd.DataFrame(full_matrix, index=sample_labels, columns=sample_labels)
+        return expand_pop_coal_times(self.pop_coal_times, self.pops, samples_dict)
 
     def simulate_haplotypes(self, n=100, L=int(1e6),random_seed=42):
         """Simulate L independent biallelic SNPs by placing a random mutation on a random tree generated from a specified demography

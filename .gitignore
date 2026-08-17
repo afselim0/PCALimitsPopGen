@@ -1,2 +1,8 @@
 misc/
-.CLAUDE
+CLAUDE.md
+results/simulations
+results/test_scripts
+results/test_figures
+results/data
+*.DS_Store
+*.pyc

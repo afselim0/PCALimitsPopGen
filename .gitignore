@@ -3,6 +3,6 @@ CLAUDE.md
 results/simulations
 results/test_scripts
 results/test_figures
-results/data
+results/analysis
 *.DS_Store
 *.pyc

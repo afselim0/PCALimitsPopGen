@@ -61,7 +61,7 @@ def _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_pro
                                     random_seed=random_seed, num_replicates=L,
                                     sequence_length=1, ploidy=2)
     n_tot = 2*sum(samples_dict.values())
-    haplotypes = np.zeros((n_tot, L))
+    haplotypes = np.zeros((n_tot, L), dtype=np.bool_)
     rng = np.random.default_rng(random_seed)
     for i, ts in tqdm(enumerate(ts_samples), total=L, disable=not show_progress):
         tree = ts.first()
@@ -74,37 +74,123 @@ def _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_pro
         ancestral_branch_lengths = np.array(ancestral_branch_lengths)
         probabilities = ancestral_branch_lengths / np.sum(ancestral_branch_lengths)
         mutation_node = rng.choice(nodes, p=probabilities)
-        haplotypes[np.array(list(tree.leaves(mutation_node))), i] = 1
+        haplotypes[np.array(list(tree.leaves(mutation_node))), i] = True
     return haplotypes
 
 
-def simulate_haplotypes(demography, n=100, L=int(1e6), random_seed=42, n_workers=1):
+def simulate_haplotypes(demography, n=100, L=int(1e6), random_seed=42, n_workers=1,
+                         show_progress=True):
     """Simulate L independent biallelic SNPs by placing a random mutation on a random tree generated from a specified demography
 
     Args:
-        n (int, optional): number of diploid individuals from each population. Defaults to 100. (half of the number of per-population haploid sample size)
+        n (int or dict, optional): number of diploid individuals per population. A scalar
+            applies the same size to every population; a dict {pop_name: n_a} allows
+            per-population sizes. Defaults to 100.
         L (int, optional): Number of SNPs to simulate. Defaults to int(1e5).
         random_seed (int, optional): Random seed for reproducibility. Defaults to 42.
         n_workers (int, optional): number of processes to split the L replicates across. Each
             replicate is an independent coalescent simulation, so this parallelizes with no
             cross-worker communication; workers use random_seed + worker index. Defaults to 1
             (serial, same behavior/output as before).
+        show_progress (bool, optional): show a tqdm bar over the L replicates. Defaults to True;
+            set False when the caller already tracks progress at a coarser level.
     """
-    samples_dict = {pop: int(n) for pop in _sampling_populations(demography)}
+    if isinstance(n, dict):
+        samples_dict = {pop: int(n[pop]) for pop in _sampling_populations(demography)}
+    else:
+        samples_dict = {pop: int(n) for pop in _sampling_populations(demography)}
 
     if n_workers <= 1:
-        return _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, True)
+        return _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_progress)
 
     n_workers = min(n_workers, L)
     chunk_sizes = np.diff(np.linspace(0, L, n_workers + 1).astype(int))
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futures = [
             ex.submit(_simulate_haplotype_chunk, demography, samples_dict,
-                      int(chunk_L), random_seed + w, w == 0)
+                      int(chunk_L), random_seed + w, show_progress and w == 0)
             for w, chunk_L in enumerate(chunk_sizes) if chunk_L > 0
         ]
         chunks = [f.result() for f in futures]
     return np.concatenate(chunks, axis=1)
+
+def _simulate_counts_chunk(demography, samples_dict, L, random_seed, show_progress):
+    """Derived allele *count* for L independent SNPs, without building the genotype matrix."""
+    ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
+                                      random_seed=random_seed, num_replicates=L,
+                                      sequence_length=1, ploidy=2)
+    counts = np.zeros(L, dtype=np.int32)
+    rng = np.random.default_rng(random_seed)
+    for i, ts in tqdm(enumerate(ts_samples), total=L, disable=not show_progress):
+        tree = ts.first()
+        nodes, ancestral_branch_lengths = [], []
+        for u in tree.nodes():
+            bl = tree.branch_length(u)
+            if bl > 0:
+                nodes.append(u)
+                ancestral_branch_lengths.append(bl)
+        ancestral_branch_lengths = np.array(ancestral_branch_lengths)
+        probabilities = ancestral_branch_lengths / np.sum(ancestral_branch_lengths)
+        mutation_node = rng.choice(nodes, p=probabilities)
+        # The genotype column is the indicator of this node's leaf set, so its derived
+        # allele count is just how many leaves it has -- no need to materialize the column.
+        counts[i] = tree.num_samples(mutation_node)
+    return counts
+
+
+def simulate_allele_counts(demography, n=100, L=int(1e6), random_seed=42, n_workers=1,
+                           show_progress=True):
+    """
+    Derived allele counts for L independent biallelic SNPs, one integer per SNP.
+
+    Same model as simulate_haplotypes -- one mutation placed on a random ancestral branch
+    of each independent tree -- but records only how many samples carry the derived allele
+    rather than which ones. For any quantity that depends on the genotype matrix solely
+    through its column allele frequencies (L_eff and the site frequency spectrum, for
+    instance) this is exactly equivalent and costs O(L) storage instead of O(N * L): at
+    N = 1e4 and L = 1e6 that is 4 MB rather than 10 GB.
+
+    Args:
+        n: diploid individuals per population; each contributes 2 haploid samples.
+        L: number of independent SNPs.
+        n_workers: processes to split the L replicates across.
+
+    Returns:
+        (counts, n_haploid): the length-L int32 array of derived allele counts, and the
+        total number of haploid samples they are counts out of.
+    """
+    samples_dict = {pop: int(n) for pop in _sampling_populations(demography)}
+    n_haploid = 2 * sum(samples_dict.values())
+
+    if n_workers <= 1:
+        return _simulate_counts_chunk(demography, samples_dict, L, random_seed,
+                                      show_progress), n_haploid
+
+    n_workers = min(n_workers, L)
+    chunk_sizes = np.diff(np.linspace(0, L, n_workers + 1).astype(int))
+    with ProcessPoolExecutor(max_workers=n_workers) as ex:
+        futures = [
+            ex.submit(_simulate_counts_chunk, demography, samples_dict,
+                      int(chunk_L), random_seed + w, show_progress and w == 0)
+            for w, chunk_L in enumerate(chunk_sizes) if chunk_L > 0
+        ]
+        chunks = [f.result() for f in futures]
+    return np.concatenate(chunks), n_haploid
+
+
+def subsample_allele_counts(counts, n_full, n, rng):
+    """
+    Down-sample derived allele counts from n_full haploid samples to n, hypergeometrically.
+
+    Drawing n of the n_full samples without replacement and counting how many carry the
+    derived allele is exactly a hypergeometric draw, so a subsample's frequency spectrum
+    can be obtained from the full one without ever storing the genotype matrix.
+
+    Returns the counts out of n, including the zeros and n's -- loci that are monomorphic
+    in the subsample. Callers filter those out as usual.
+    """
+    return rng.hypergeometric(counts, n_full - counts, n)
+
 
 def compute_pop_coal_times(demography, pops):
     """Mean pairwise coalescence time between (and within) each population."""
@@ -253,6 +339,157 @@ def K2_structure_eigenvalue(sample_sizes, T_within, T_between):
     F2 = T_between - (tau_1 + tau_2) / 2
     return 2*N*phi_1*phi_2*F2/tau_bar - (phi_1 - phi_2)*(tau_1 - tau_2)/tau_bar
 
+def _clean_phi_eps(phi, eps, gamma):
+    """Validate and normalize phi/eps, dropping empty populations (phi_a == 0)."""
+    phi = np.asarray(phi, dtype=float)
+    eps = np.asarray(eps, dtype=float)
+
+    if phi.shape != eps.shape:
+        raise ValueError(f"phi and eps must have the same shape, got "
+                         f"{phi.shape} and {eps.shape}")
+    if gamma <= 0:
+        raise ValueError(f"gamma must be positive, got {gamma:g}")
+    if np.any(phi < 0):
+        raise ValueError("phi must be non-negative")
+
+    keep = phi > 0
+    if not keep.any():
+        raise ValueError("phi must have at least one positive entry")
+    phi, eps = phi[keep], eps[keep]
+    return phi / phi.sum(), eps
+
+
+def detection_g(nu, phi, eps, gamma):
+    """
+    g(nu) = gamma * sum_a phi_a * ((1 + eps_a) / (nu - eps_a))^2, the function whose
+    level set g = 1 defines detectability (see is_detectable).
+
+    Returns +inf at a pole (nu equal to some eps_a with phi_a > 0), which is the
+    correct limit and keeps the g < 1 test false there rather than raising.
+    """
+    phi, eps = _clean_phi_eps(phi, eps, gamma)
+    nu = np.asarray(nu, dtype=float)
+
+    def g_scalar(v):
+        denom = v - eps
+        if np.any(denom == 0.0):
+            return np.inf
+        return gamma * np.sum(phi * ((1.0 + eps) / denom) ** 2)
+
+    if nu.ndim == 0:
+        return float(g_scalar(float(nu)))
+    return np.array([g_scalar(float(v)) for v in nu])
+
+
+def is_detectable(nu_k, phi, eps, gamma):
+    """
+    Whether a structure eigenvalue nu_k separates from the floor, by the general
+    BBP criterion g(nu_k) < 1.
+
+    This is the criterion to prefer over comparing against the scalar threshold
+    from critical_eigenvalue(): that scalar is the *largest* root of g = 1, so
+    nu_k > nu_c is sufficient but not necessary. g has a pole at each eps_a and
+    dips between consecutive poles, so when the eps_a are heterogeneous the floor
+    splits into several bulks and a nu_k can be detectable while sitting in a gap
+    below the largest root. The two agree when the eps_a are near-homogeneous.
+
+    Accepts scalar or array nu_k; returns bool or bool array to match.
+    """
+    g_val = detection_g(nu_k, phi, eps, gamma)
+    return g_val < 1.0
+
+
+def detection_psi(k, spectrum, L, degenerate_subspace=False, rtol=1e-8):
+    """
+    Psi(nu_k) = 1/L * sum_{j != k} ((1 + nu_j) / (nu_k - nu_j))^2, the spatial
+    (N ~ K) analogue of detection_g.
+
+    Where g weights K population-level floor levels by phi_a, this sums over every
+    *other* eigenvalue of the spectrum: once K is comparable to N the floor
+    eigenvalues are no longer the overwhelming majority, so no small set of levels
+    stands in for the rest of the spectrum and each nu_j must be counted
+    individually.
+
+    Degeneracy needs a decision, and the two cases pull opposite ways:
+
+      - A degenerate *structure* eigenvalue (2D stepping-stones routinely give
+        exactly degenerate pairs) spans a d-dimensional subspace that is detectable
+        as a subspace, even though PCA cannot resolve a canonical basis inside it.
+        Its copies are the same eigenspace, not competitors to separate from.
+      - A *floor* eigenvalue's degeneracy is the bulk itself. Excluding its copies
+        would leave only the distant spikes and report the floor as detectable.
+
+    So the exclusion is opt-in. By default this follows the literal j != k
+    definition, which keeps floor eigenvalues undetectable (Psi -> inf on an exact
+    tie). Pass degenerate_subspace=True when nu_k is known to be a structure
+    eigenvalue and you want it judged as the subspace it spans; only then are
+    eigenvalues within rtol of nu_k dropped along with the candidate.
+
+    rtol is relative and must be loose enough for the ~1e-15 spread that
+    diagonalizing a symmetric demography leaves on an exact degeneracy, while
+    staying far below any real eigenvalue spacing.
+
+    Args:
+        k: index of the candidate in spectrum (negative indices allowed).
+        spectrum: the full 1-D spectrum.
+        L: number of SNPs.
+        degenerate_subspace: treat eigenvalues degenerate with nu_k as part of the
+            candidate's own eigenspace and exclude them. Use only for structure
+            eigenvalues; leaving it False is correct for floor eigenvalues.
+        rtol: relative tolerance for that degeneracy test.
+
+    Returns:
+        float: Psi(nu_k). +inf if an eigenvalue coincides with nu_k and is not
+        excluded. 0.0 if nothing remains to sum over.
+    """
+    spectrum = np.asarray(spectrum, dtype=float)
+    if spectrum.ndim != 1:
+        raise ValueError(f"spectrum must be 1-D, got shape {spectrum.shape}")
+    if L <= 0:
+        raise ValueError(f"L must be positive, got {L:g}")
+    if rtol < 0:
+        raise ValueError(f"rtol must be non-negative, got {rtol:g}")
+
+    k = int(k)
+    if not -spectrum.size <= k < spectrum.size:
+        raise IndexError(f"k={k} out of range for a spectrum of size {spectrum.size}")
+    k %= spectrum.size
+
+    nu_k = spectrum[k]
+    others = np.delete(spectrum, k)
+    if others.size == 0:
+        return 0.0
+
+    if degenerate_subspace:
+        # Drop the rest of the candidate's own eigenspace.
+        atol = rtol * max(abs(nu_k), 1.0)
+        others = others[np.abs(others - nu_k) > atol]
+        if others.size == 0:
+            return 0.0
+
+    denom = nu_k - others
+    if np.any(denom == 0.0):
+        return np.inf
+    return float(np.sum(((1.0 + others) / denom) ** 2) / L)
+
+
+def is_detectable_spectrum(k, spectrum, L, degenerate_subspace=False, rtol=1e-8):
+    """
+    Whether the eigenvalue at index k separates from the rest of the spectrum, by
+    the spatial (N ~ K) criterion Psi(nu_k) < 1.
+
+    Use this instead of is_detectable() when K is comparable to N, where the
+    floor is not a well-defined bulk of a few repeated levels. Takes the whole
+    spectrum, since every other eigenvalue enters the sum.
+
+    For a degenerate structure eigenvalue pass degenerate_subspace=True to judge it
+    as the subspace it spans, so both members of a degenerate pair agree; see
+    detection_psi for why this is not the default.
+    """
+    return detection_psi(k, spectrum, L,
+                         degenerate_subspace=degenerate_subspace, rtol=rtol) < 1.0
+
+
 def critical_eigenvalue(phi, eps, gamma, xtol=1e-14, max_expand=200):
     """
     The detection threshold nu_c: the largest root of
@@ -284,22 +521,7 @@ def critical_eigenvalue(phi, eps, gamma, xtol=1e-14, max_expand=200):
     Returns:
         float: nu_c. For eps_a == 0 for all a this is exactly sqrt(gamma).
     """
-    phi = np.asarray(phi, dtype=float)
-    eps = np.asarray(eps, dtype=float)
-
-    if phi.shape != eps.shape:
-        raise ValueError(f"phi and eps must have the same shape, got "
-                         f"{phi.shape} and {eps.shape}")
-    if gamma <= 0:
-        raise ValueError(f"gamma must be positive, got {gamma:g}")
-    if np.any(phi < 0):
-        raise ValueError("phi must be non-negative")
-
-    keep = phi > 0
-    if not keep.any():
-        raise ValueError("phi must have at least one positive entry")
-    phi, eps = phi[keep], eps[keep]
-    phi = phi / phi.sum()
+    phi, eps = _clean_phi_eps(phi, eps, gamma)
 
     def g(nu):
         return gamma * np.sum(phi * ((1.0 + eps) / (nu - eps)) ** 2)

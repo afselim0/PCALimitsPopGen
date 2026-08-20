@@ -86,8 +86,10 @@ def probe_cost(cfg, probe_dir, verbose=True):
     Probe cfg's cheapest/most-expensive rows at PROBE_L, n_workers=1, in subprocesses (so
     each probe's peak RSS is isolated and the parent's own memory doesn't pollute it).
 
-    Returns (seconds_per_snp_worst, peak_rss_gb_worst, N_max): N_max is the largest total
-    sample size across all probed rows, for the analytic N*L memory term.
+    Returns (seconds_per_snp_worst, peak_rss_gb_worst, N_max, counts_mode): N_max is the
+    largest total sample size across all probed rows, for the analytic N*L memory term.
+    counts_mode is True iff every probed row outputs allele counts (O(L) storage) rather
+    than a genotype matrix (O(N*L)) -- only the panmictic kind ever sets this.
     """
     kind_module = get_kind(cfg["kind"])
     table = kind_module.build_parameter_table(cfg)
@@ -95,6 +97,7 @@ def probe_cost(cfg, probe_dir, verbose=True):
     os.makedirs(probe_dir, exist_ok=True)
 
     worst_rate, worst_rss, N_max = 0.0, 0.0, 0
+    counts_mode = True
     for row in rows:
         q = Queue()
         p = Process(target=_run_probe, args=(kind_module, row, cfg, probe_dir, q))
@@ -108,11 +111,12 @@ def probe_cost(cfg, probe_dir, verbose=True):
         worst_rate = max(worst_rate, rate)
         worst_rss = max(worst_rss, peak_rss_gb)
         N_max = max(N_max, int(row.N))
+        counts_mode = counts_mode and bool(row.get("counts", False))
         if verbose:
             print(f"  probe simID={row.simID}: {elapsed:.2f}s for {PROBE_L} SNPs "
                   f"({rate*1000:.2f} ms/SNP), peak RSS {peak_rss_gb:.2f} GB, N={int(row.N)}")
 
-    return worst_rate, worst_rss, N_max
+    return worst_rate, worst_rss, N_max, counts_mode
 
 
 def estimate(cfg, probe_dir, n_workers=DEFAULT_CPUS, verbose=True):
@@ -135,11 +139,15 @@ def estimate(cfg, probe_dir, n_workers=DEFAULT_CPUS, verbose=True):
     else:
         L = cfg["fixed"]["L"]
 
-    rate, probe_rss_gb, N_max = probe_cost(cfg, probe_dir, verbose=verbose)
+    rate, probe_rss_gb, N_max, counts_mode = probe_cost(cfg, probe_dir, verbose=verbose)
 
-    # analytic N*L bool array term: the final concatenated array (utils.simulate_haplotypes)
-    # plus each worker's own chunk held concurrently -- roughly (1 + 1/n_workers) * N*L bytes
-    array_gb = _bytes_to_gb(N_max * L)
+    # analytic array-memory term: allele-counts mode stores one int32 per SNP (O(L),
+    # independent of N); genotype-matrix mode holds the final concatenated N*L bool array
+    # plus each worker's own chunk concurrently -- roughly (1 + 1/n_workers) * N*L bytes.
+    if counts_mode:
+        array_gb = _bytes_to_gb(4 * L)
+    else:
+        array_gb = _bytes_to_gb(N_max * L)
 
     def total_mem_gb(workers):
         return (probe_rss_gb + array_gb * (1.0 + 1.0 / workers)) * MEM_HEADROOM

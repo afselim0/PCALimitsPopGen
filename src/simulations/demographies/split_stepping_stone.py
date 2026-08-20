@@ -50,6 +50,9 @@ def demography(K, Ne_ancestral, t_split, m):
     Ne_ancestral / K**2), connected by nearest-neighbour migration at rate m from
     t_split to the present -- the same grid construction as stepping_stone_2d.demography,
     layered under a single recent split rather than being the whole history.
+
+    msprime rejects a single population-split event that touches more than 100
+    populations (derived + ancestral) at once, so K must satisfy K^2 + 1 <= 100 (K <= 9).
     """
     Ne_deme = Ne_ancestral / (K * K)
     dem = msprime.Demography()

@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name={job_name}
+#SBATCH --account=pi-jnovembre
+#SBATCH --partition=jnovembre
 #SBATCH --array=0-{n_rows_minus_1}
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem={mem}
@@ -10,7 +12,9 @@
 # Auto-generated from {config_path} by sbatch.py -- do not hand-edit the --array bound,
 # regenerate instead if the config's sweep size changes.
 mkdir -p logs
-conda run -n pca_rmt python src/simulations/run_simulation.py {config_path} \
+source /software/bin/miniconda3/etc/profile.d/conda.sh
+conda activate /project/jnovembre/afselim/pca_rmt
+python src/simulations/run_simulation.py {config_path} \
     --n-workers "${{SLURM_CPUS_PER_TASK}}" \
     --task-index "${{SLURM_ARRAY_TASK_ID}}" \
     --outdir {outdir}

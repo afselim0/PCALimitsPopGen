@@ -3,11 +3,11 @@ name: default
 random_seed: 42
 n_workers: 8
 fixed:
-  K: 10                     # 10x10 grid, Ne_per_deme = 10000/100 = 100
-  Ne_ancestral: 10000     # = Ne_deme * K^2 = 100 * 100
+  K: 9                      # 9x9 grid, Ne_per_deme = 10000/81 ~= 123.5
+  Ne_ancestral: 10000     # = Ne_deme * K^2 = 123.5 * 81
   t_split: 50
-  n_per_pop_A: 10000       # n_B = n_per_deme_B * K^2 = 100*100 = 1e4, matches A
-  n_per_deme_B: 100
+  n_per_pop_A: 10000       # n_B = n_per_deme_B * K^2 = 124*81 = 10044, matches A
+  n_per_deme_B: 124
   L: 20000
 sweep:
   type: stepping_stone

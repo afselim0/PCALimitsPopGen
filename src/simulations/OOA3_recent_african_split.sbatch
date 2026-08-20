@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=OOA3_split
+#SBATCH --account=pi-jnovembre
+#SBATCH --partition=jnovembre
 #SBATCH --array=0-49
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=12G
@@ -19,7 +21,9 @@
 # Submit from the repo root: sbatch src/simulations/OOA3_recent_african_split.sbatch
 
 mkdir -p logs
-conda run -n pca_rmt python src/simulations/OOA3_recent_african_split.py \
+source /software/bin/miniconda3/etc/profile.d/conda.sh
+conda activate /project/jnovembre/afselim/pca_rmt
+python src/simulations/OOA3_recent_african_split.py \
     --n-per-pop-by-pop CEU=5000,CHB=5000,YRI=2000,YRI2=2000 \
     --n-workers "${SLURM_CPUS_PER_TASK}" \
     --task-index "${SLURM_ARRAY_TASK_ID}"

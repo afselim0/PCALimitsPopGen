@@ -14,4 +14,7 @@ sweep:
   max: 0.1
   spacing: log_dense_high   # finer resolution near m_max, where m_c is expected to sit
 cluster:
-  job_name: SS_2D          # mem/time/cpus_per_task auto-probed by run_simulation.py --submit
+  job_name: SS_2D
+  mem: 1G           # from --estimate probe on 2026-08-20 (K=9): worst-case high-m row is
+  time: "10:22:07"  # slow enough (574s/100 SNPs) that re-probing on every submit is wasteful
+  cpus_per_task: 8

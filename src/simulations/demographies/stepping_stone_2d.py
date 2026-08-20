@@ -1,20 +1,22 @@
 """
-2D stepping-stone haplotypes over a sweep of migration rates, for each of several grid
-side lengths K, on a K x K grid of demes with nearest-neighbour (rook's move) migration
-and reflecting boundaries (no wraparound).
+2D stepping-stone haplotypes at a fixed grid side length K, over a sweep of migration
+rates, on a K x K grid of demes with nearest-neighbour (rook's move) migration and
+reflecting boundaries (no wraparound).
 
 msprime.Demography.stepping_stone_model only supports 1D, so the K x K grid is built
 directly here: K^2 isolated demes, each connected to its up/down/left/right neighbours
-at rate m. As in stepping_stone_1d, the migration grid is normally centred per K on that K's own
-critical rate (stepping_stone_grid.sweep_plan); sweep.min/sweep.max override this with an
-explicit range when both are given.
+at rate m.
+
+K, Ne and L are fixed parameters (fixed.K, fixed.Ne, fixed.L); only m is swept. The
+migration grid is normally centred around K's own critical rate
+(stepping_stone_grid.sweep_plan); sweep.min/sweep.max override this with an explicit
+range when both are given.
 
 The leading eigenvalue is doubly degenerate here (mu_10 = mu_01) -- the recoverable
 object is a 2D subspace, not a single PC. See src/analysis/SteppingStoneDetection.py.
 
-Output directories: one per (K[, L]) cell, K<K> or K<K>_L<L>, each with its own
-simulation_parameters.csv and m<value>.npy -- relied on by
-src/analysis/stepping_stone_detection.py and must not change.
+Output directory: K<K>, with its own simulation_parameters.csv and m<value>.npy -- relied
+on by src/analysis/stepping_stone_detection.py and must not change.
 """
 import os
 import sys
@@ -29,7 +31,8 @@ from utils import simulate_haplotypes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/simulations/
 from sweep import axis_values, check_no_collisions, run_table, run_one_row
-from stepping_stone_grid import sweep_plan
+from stepping_stone_grid import (PANMICTIC_M_THRESHOLD, PANMICTIC_TOLERANCE, maybe_pool,
+                                 mixing_time, sweep_plan)
 
 DIMENSION = 2
 
@@ -38,13 +41,22 @@ def format_m(m):
     return f"m{m:.4e}"
 
 
-def cell_name(K, L, L_is_swept):
-    return f"K{K}_L{L}" if L_is_swept else f"K{K}"
+def cell_name(K):
+    return f"K{K}"
 
 
-def demography(K, Ne, m):
-    """K x K isolated demes, connected to their 4-neighbours at rate m. No wraparound:
-    corner demes get 2 neighbours, edge demes 3, internal demes 4."""
+def demography(K, Ne, m, pool_threshold=PANMICTIC_M_THRESHOLD,
+               pool_tolerance=PANMICTIC_TOLERANCE):
+    """
+    K x K isolated demes, connected to their 4-neighbours at rate m. No wraparound:
+    corner demes get 2 neighbours, edge demes 3, internal demes 4.
+
+    Above pool_threshold the grid is collapsed into a single panmictic population of size
+    Ne * K^2 once lineages have mixed -- see stepping_stone_grid.add_panmictic_phase. This
+    matters most here: a K x K grid has K^2 demes, so the structured phase is the expensive
+    part, and a 10x10 grid runs 45x faster at m = 0.4. Pass pool_threshold=None to keep the
+    fully structured model throughout.
+    """
     dem = msprime.Demography.isolated_model([Ne] * K * K)
     for row in range(K):
         for col in range(K):
@@ -57,43 +69,52 @@ def demography(K, Ne, m):
                 nb = (row + 1) * K + col
                 dem.migration_matrix[deme, nb] = m
                 dem.migration_matrix[nb, deme] = m
-    return dem
+    if pool_threshold is None:
+        return dem
+    return maybe_pool(dem, K, m, Ne, DIMENSION, pool_threshold, pool_tolerance)[0]
 
 
 def build_parameter_table(cfg):
     fixed, sweep = cfg["fixed"], cfg["sweep"]
-    n_per_deme = fixed["n_per_deme"]
+    K, n_per_deme, L = fixed["K"], fixed["n_per_deme"], fixed["L"]
     random_seed = cfg["random_seed"]
-    L_values = sweep.get("L_values", [fixed.get("L", 500)])
-    L_is_swept = len(L_values) > 1
-    Ne_fixed = fixed.get("Ne", sweep.get("Ne"))
+    Ne_fixed = fixed.get("Ne")
     explicit_range = "min" in sweep and "max" in sweep
 
-    frames = []
-    for L in L_values:
-        plan = sweep_plan(sweep["K_values"], n_per_deme, L, dimension=DIMENSION,
-                          num_m=sweep.get("num_m", 40), span=sweep.get("span", 3.0),
-                          Ne=Ne_fixed, target_m=None if Ne_fixed else sweep.get("target_m", 0.02))
-        for cell in plan:
-            m_values = (axis_values(sweep["min"], sweep["max"], sweep.get("num_m", 40),
-                                    sweep.get("spacing", "log"))
-                       if explicit_range else cell["m_values"])
-            simIDs = [format_m(m) for m in m_values]
-            check_no_collisions(simIDs, "m values")
-            frames.append(pd.DataFrame({
-                "simID": simIDs,
-                "outdir_suffix": cell_name(cell["K"], L, L_is_swept),
-                "K": cell["K"], "K_demes": cell["K_demes"], "m": m_values,
-                "M": 4 * cell["Ne"] * m_values,
-                "M_c": cell["M_c"], "M_c_approx": cell["M_c_approx"], "m_c": cell["m_c"],
-                "Ne": cell["Ne"], "n_per_deme": n_per_deme, "N": cell["N"], "L": L,
-                "random_seed": random_seed + np.arange(len(m_values)),
-            }))
-    return pd.concat(frames, ignore_index=True)
+    cell = sweep_plan([K], n_per_deme, L, dimension=DIMENSION,
+                      num_m=sweep.get("num_m", 40), span=sweep.get("span", 3.0),
+                      Ne=Ne_fixed, target_m=None if Ne_fixed else sweep.get("target_m", 0.02))[0]
+    m_values = (axis_values(sweep["min"], sweep["max"], sweep.get("num_m", 40),
+                            sweep.get("spacing", "log"))
+               if explicit_range else cell["m_values"])
+    simIDs = [format_m(m) for m in m_values]
+    check_no_collisions(simIDs, "m values")
+
+    # Record where the panmictic switch falls (NaN where the cell stays fully structured),
+    # so the on-disk table says which simulations used the approximation.
+    pool_threshold = sweep.get("pool_threshold", PANMICTIC_M_THRESHOLD)
+    pool_tolerance = sweep.get("pool_tolerance", PANMICTIC_TOLERANCE)
+    t_pooled = [mixing_time(K, m, DIMENSION, pool_tolerance)
+                if pool_threshold is not None and m > pool_threshold else np.nan
+                for m in m_values]
+
+    return pd.DataFrame({
+        "simID": simIDs,
+        "outdir_suffix": cell_name(K),
+        "K": K, "K_demes": cell["K_demes"], "m": m_values,
+        "M": 4 * cell["Ne"] * m_values,
+        "M_c": cell["M_c"], "M_c_approx": cell["M_c_approx"], "m_c": cell["m_c"],
+        "Ne": cell["Ne"], "n_per_deme": n_per_deme, "N": cell["N"], "L": L,
+        "t_pooled": t_pooled,
+        "random_seed": random_seed + np.arange(len(m_values)),
+    })
 
 
 def simulate_one(row, cfg, outdir, n_workers):
-    dem = demography(row.K, row.Ne, row.m)
+    sweep = cfg["sweep"]
+    dem = demography(row.K, row.Ne, row.m,
+                     pool_threshold=sweep.get("pool_threshold", PANMICTIC_M_THRESHOLD),
+                     pool_tolerance=sweep.get("pool_tolerance", PANMICTIC_TOLERANCE))
     X = simulate_haplotypes(dem, n=row.n_per_deme / 2, L=row.L,
                             random_seed=int(row.random_seed), n_workers=n_workers,
                             show_progress=False)
@@ -104,10 +125,9 @@ def simulate_one(row, cfg, outdir, n_workers):
 def run(cfg, outdir, n_workers, dry_run=False, verbose=True):
     table = build_parameter_table(cfg)
     if verbose:
-        for suffix, g in table.groupby("outdir_suffix", sort=False):
-            print(f"{suffix}: {len(g)} simulations ({g.K_demes.iloc[0]} demes), "
-                  f"Ne={g.Ne.iloc[0]}, N={g.N.iloc[0]}, L={g.L.iloc[0]}, "
-                  f"M_c={g.M_c.iloc[0]:.1f}, m_c={g.m_c.iloc[0]:.4g}")
+        print(f"{table.outdir_suffix.iloc[0]}: {len(table)} simulations "
+              f"({table.K_demes.iloc[0]} demes), Ne={table.Ne.iloc[0]}, N={table.N.iloc[0]}, "
+              f"L={table.L.iloc[0]}, M_c={table.M_c.iloc[0]:.1f}, m_c={table.m_c.iloc[0]:.4g}")
         print(f"output -> {outdir}")
     return run_table(table, lambda row: simulate_one(row, cfg, outdir, n_workers),
                      outdir, dry_run=dry_run, verbose=verbose, desc="stepping_stone_2d")

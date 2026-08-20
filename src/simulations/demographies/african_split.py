@@ -14,7 +14,12 @@ DemographyDebugger.mean_coalescence_time, as 1 - t_within / t_between.
 fixed.n_per_pop may be a scalar (uniform across CEU/CHB/YRI/YRI2) or a per-population
 dict, e.g. {CEU: 5000, CHB: 5000, YRI: 2000, YRI2: 2000}.
 
-Output: t<t_split>_Fst<Fst>.npy, the (sum of n_per_pop) x L genotype matrix (np.bool_).
+t_split is the swept parameter, but files are named by the numerically-computed
+Fst(YRI, YRI2), not t_split -- Fst is the quantity of scientific interest, and t_split is
+merely how it's parameterized (and is still recorded as a column in
+simulation_parameters.csv for reproducibility).
+
+Output: Fst<Fst>.npy, the (sum of n_per_pop) x L genotype matrix (np.bool_).
 Sample order is alphabetical by population: CEU, CHB, YRI, YRI2.
 """
 import copy
@@ -35,8 +40,8 @@ from sweep import axis_values, check_no_collisions, run_table, run_one_row
 POPS = ["CEU", "CHB", "YRI", "YRI2"]
 
 
-def format_simID(t_split, Fst):
-    return f"t{t_split:.4e}_Fst{Fst:.4e}"
+def format_simID(Fst):
+    return f"Fst{Fst:.4e}"
 
 
 def _n_per_pop_dict(n_per_pop):
@@ -90,8 +95,8 @@ def build_parameter_table(cfg):
 
     t_values = axis_values(sweep["min"], sweep["max"], sweep["num"], sweep.get("spacing", "log"))
     Fst_values = [theoretical_Fst(demography(t)) for t in t_values]
-    simIDs = [format_simID(t, f) for t, f in zip(t_values, Fst_values)]
-    check_no_collisions(simIDs, "t_split values")
+    simIDs = [format_simID(f) for f in Fst_values]
+    check_no_collisions(simIDs, "Fst values")
 
     return pd.DataFrame({
         "simID": simIDs,

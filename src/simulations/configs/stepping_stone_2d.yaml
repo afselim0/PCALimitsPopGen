@@ -3,16 +3,15 @@ name: default
 random_seed: 42
 n_workers: 8
 fixed:
+  K: 10               # 10x10 grid, 100 demes
   n_per_deme: 64
   L: 20000
   Ne: 1000
 sweep:
   type: stepping_stone
-  K_values: [10]        # 10x10 grid, 100 demes
-  L_values: [20000]
   num_m: 100
   min: 0.001
-  max: 0.01
-  
+  max: 0.1
+  spacing: log_dense_high   # finer resolution near m_max, where m_c is expected to sit
 cluster:
   job_name: SS_2D          # mem/time/cpus_per_task auto-probed by run_simulation.py --submit

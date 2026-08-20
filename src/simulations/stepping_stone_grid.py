@@ -135,6 +135,91 @@ def critical_M_approx(K, n_per_deme, L, dimension=1):
     return scale * np.sqrt(N * L) / np.pi ** 2
 
 
+PANMICTIC_M_THRESHOLD = 0.1
+PANMICTIC_TOLERANCE = 1e-6
+_MAX_SPLIT_DERIVED = 99
+
+
+def mixing_time(K, m, dimension=1, tolerance=PANMICTIC_TOLERANCE):
+    """
+    Generations until a lineage is essentially equally likely to be in any deme.
+
+    A single lineage's deme occupancy p(t) follows dp/dt = -m Lambda^T p, so in the
+    Laplacian eigenbasis the component along mode k decays as exp(-m mu_k t). The mu_0 = 0
+    mode is the uniform stationary distribution; every deviation from uniform decays, and
+    the slowest is the one along mu_1. Requiring that deviation to fall below `tolerance`
+    gives
+
+        t_mix = log(1 / tolerance) / (m * mu_1).
+
+    Checked against the exact total-variation distance (worst-case start, via matrix
+    exponential): the coefficient log(1/tol) is accurate to a few percent -- 8.76 measured
+    against log(1e4) = 9.21 -- and the residual dependence on deme count is weak, moving
+    only 8.76 -> 8.98 from 10 to 100 demes. This is a single-lineage argument; coalescence
+    depends on *pair* occupancy, which relaxes on a comparable but not identical timescale,
+    so the tolerance carries a margin rather than being a tight bound.
+    """
+    if not 0 < tolerance < 1:
+        raise ValueError(f"tolerance must be in (0, 1), got {tolerance}")
+    if m <= 0:
+        raise ValueError(f"m must be positive, got {m}")
+    mu_1 = laplacian_eigenvalues(K, dimension)[0]
+    return float(np.log(1.0 / tolerance) / (m * mu_1))
+
+
+def add_panmictic_phase(demography, K, m, Ne, dimension=1,
+                        tolerance=PANMICTIC_TOLERANCE):
+    """
+    Collapse a stepping-stone demography into one panmictic deme past the mixing time.
+
+    Once lineages are uniformly spread the structured model is indistinguishable from a
+    single population of the pooled size Ne * K_demes (Wakeley's collecting phase), but
+    msprime still pays to track migration among every deme. Splitting the demes into one
+    ancestral population at t_mix keeps the part of the history that carries structure and
+    drops the part that does not.
+
+    Measured on a 10x10 grid this is 5.9x faster at m = 0.05 and 45x at m = 0.40 -- the
+    speedup grows with m because faster mixing means an earlier switch -- while mean
+    coalescent times stay within ~1-2% of the exact model, inside Monte Carlo error.
+
+    Mutates and returns `demography`.
+    """
+    K_demes = num_demes(K, dimension)
+    t_switch = mixing_time(K, m, dimension, tolerance)
+
+    names = [pop.name for pop in demography.populations]
+    if len(names) != K_demes:
+        raise ValueError(f"expected {K_demes} demes, found {len(names)}")
+
+    demography.add_population(name="pooled", initial_size=Ne * K_demes)
+    # msprime allows at most 100 populations per split event, counting the ancestral one,
+    # so at most 99 derived. A 10x10 grid has exactly 100 demes and just exceeds that;
+    # the remainder joins in a second event an instant later.
+    demography.add_population_split(
+        time=t_switch, derived=names[:_MAX_SPLIT_DERIVED], ancestral="pooled")
+    if len(names) > _MAX_SPLIT_DERIVED:
+        demography.add_population_split(
+            time=t_switch * (1 + 1e-9), derived=names[_MAX_SPLIT_DERIVED:],
+            ancestral="pooled")
+    return demography
+
+
+def maybe_pool(demography, K, m, Ne, dimension=1,
+               threshold=PANMICTIC_M_THRESHOLD, tolerance=PANMICTIC_TOLERANCE):
+    """
+    Apply add_panmictic_phase only when m exceeds `threshold`.
+
+    Below the threshold the timescales are not well separated enough for the switch to be
+    clearly safe, and there is little to gain anyway: the saving comes from skipping a long
+    well-mixed phase, which barely exists when migration is slow. Returns
+    (demography, t_switch or None).
+    """
+    if m <= threshold:
+        return demography, None
+    t_switch = mixing_time(K, m, dimension, tolerance)
+    return add_panmictic_phase(demography, K, m, Ne, dimension, tolerance), t_switch
+
+
 def Ne_for_target_m(M_c, target_m):
     """
     Deme size placing the critical migration rate at target_m, since M = 4 Ne mbar.
@@ -159,6 +244,12 @@ def migration_grid(m_c, num_m, span=8.0):
     logarithmic, so it does not preserve the log grid: for span = 8 it puts 97% of the
     rates above m_c and leaves the detectable side with almost no points. Plain
     geomspace instead.
+
+    This rejection is specific to centring symmetrically around a known m_c -- it is not
+    a blanket objection to mirrored spacing. When the sweep instead uses an explicit
+    [min, max] range and the transition is expected near one end (e.g. m_max), denser
+    coverage there is exactly the point; see sweep.axis_values(..., spacing=
+    "log_dense_high"), used by the stepping-stone kind configs for that case.
     """
     if num_m < 1:
         raise ValueError(f"num_m must be at least 1, got {num_m}")

@@ -3,20 +3,17 @@ name: default
 random_seed: 42
 n_workers: 8
 fixed:
+  K: 10                     # 10x10 grid, Ne_per_deme = 10000/100 = 100
   Ne_ancestral: 10000     # = Ne_deme * K^2 = 100 * 100
   t_split: 50
   n_per_pop_A: 10000       # n_B = n_per_deme_B * K^2 = 100*100 = 1e4, matches A
   n_per_deme_B: 100
+  L: 20000
 sweep:
   type: stepping_stone
-  K_values: [10]           # 10x10 grid, Ne_per_deme = 10000/100 = 100
-  L_values: [20000]
   num_m: 100
-  # m range NOT anchored to a computed m_c: the plain stepping-stone equilibrium formula
-  # doesn't apply here because of the recent t_split (population hasn't equilibrated).
-  # Placeholder broad range -- revisit before running (deferred by user 2026-08-20).
   m_min: 0.001
-  m_max: 1.0
-  spacing: log
+  m_max: 0.1
+  spacing: log_dense_high
 cluster:
   job_name: split_SS      # mem/time/cpus_per_task auto-probed by run_simulation.py --submit

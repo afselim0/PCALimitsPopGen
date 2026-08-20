@@ -17,4 +17,4 @@ sweep:
   num: 100
   spacing: log
 cluster:
-  job_name: OOA3_split   # mem/time/cpus_per_task auto-probed by run_simulation.py --submit
+  job_name: OOA3_split   

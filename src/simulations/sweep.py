@@ -15,12 +15,24 @@ from tqdm import tqdm
 
 
 def axis_values(min_val, max_val, num, spacing="log"):
-    """num values from min_val to max_val, log- or linear-spaced."""
+    """
+    num values from min_val to max_val.
+
+    "log": plain np.geomspace -- uniform in log-space, which in linear space is denser
+    near min_val and sparser near max_val (consecutive gaps grow geometrically).
+
+    "log_dense_high": mirrors that grid (min_val + max_val - geomspace(...)) so the
+    linear-space density flips: denser near max_val, sparser near min_val. Useful when
+    the interesting behaviour (e.g. a detection threshold) sits at the high end of the
+    range and deserves finer resolution than the low, uniformly-undetectable end.
+    """
     if spacing == "log":
         return np.geomspace(min_val, max_val, num)
+    if spacing == "log_dense_high":
+        return np.sort(min_val + max_val - np.geomspace(min_val, max_val, num))
     if spacing == "linear":
         return np.linspace(min_val, max_val, num)
-    raise ValueError(f"spacing must be 'log' or 'linear', got {spacing!r}")
+    raise ValueError(f"spacing must be 'log', 'log_dense_high' or 'linear', got {spacing!r}")
 
 
 def check_no_collisions(simIDs, what="values"):

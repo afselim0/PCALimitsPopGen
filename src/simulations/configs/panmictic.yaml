@@ -1,0 +1,9 @@
+kind: panmictic
+name: default
+random_seed: 42
+n_workers: 8
+fixed:
+  N: 10000
+  L: 1000000
+  Ne: 10000
+  counts: true

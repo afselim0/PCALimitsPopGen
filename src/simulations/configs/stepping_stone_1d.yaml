@@ -1,0 +1,18 @@
+kind: stepping_stone_1d
+name: default
+random_seed: 42
+n_workers: 8
+fixed:
+  n_per_deme: 64
+  L: 20000
+  Ne: 4000
+sweep:
+  type: stepping_stone
+  K_values: [25]
+  L_values: [20000]
+  num_m: 100
+  min: 0.002
+  max: 0.2
+  
+cluster:
+  job_name: SS_1D          # mem/time/cpus_per_task auto-probed by run_simulation.py --submit

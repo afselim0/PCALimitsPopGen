@@ -1,0 +1,17 @@
+kind: split
+name: default
+random_seed: 42
+n_workers: 8
+fixed:
+  Ne: 10000
+  n_per_pop: 10000
+  L: 200000
+sweep:
+  type: axis
+  param: Fst          # t_split = 2*Ne*Fst; this range corresponds to t_split in [10, 500]
+  min: 0.0005
+  max: 0.025
+  num: 100
+  spacing: log
+cluster:
+  job_name: split         # mem/time/cpus_per_task auto-probed by run_simulation.py --submit

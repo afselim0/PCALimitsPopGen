@@ -52,8 +52,13 @@ DEFAULT_OUTDIR = os.path.join(
 )
 
 DEFAULT_N_PER_POP = 500
+# Per-population haploid sample sizes, keyed by population name (alphabetical: CEU, CHB,
+# YRI, YRI2). Overrides DEFAULT_N_PER_POP when a population isn't given a uniform size --
+# CEU/CHB simulated deeper than YRI/YRI2 to cover both the phi sweep (sisters up to 2000
+# each, i.e. phi=0.2 at N=10000) and the N sweep (others up to 4500 each at N=10000).
+DEFAULT_N_PER_POP_BY_POP = {"CEU": 5000, "CHB": 5000, "YRI": 2000, "YRI2": 2000}
 DEFAULT_L = int(2e5)
-DEFAULT_NUM_T_SPLIT = 100
+DEFAULT_NUM_T_SPLIT = 50
 DEFAULT_T_SPLIT_MIN = 10
 DEFAULT_T_SPLIT_MAX = 1000
 
@@ -118,13 +123,32 @@ def theoretical_Fst(demography):
     return 1.0 - t_within / t_between
 
 
+POPS = ["CEU", "CHB", "YRI", "YRI2"]
+
+
+def _n_per_pop_dict(n_per_pop):
+    """Normalize a scalar or {pop: n} mapping to a full {pop: n} dict over POPS."""
+    if isinstance(n_per_pop, dict):
+        missing = [p for p in POPS if p not in n_per_pop]
+        if missing:
+            raise ValueError(f"n_per_pop is missing populations: {missing}")
+        return {p: int(n_per_pop[p]) for p in POPS}
+    return {p: int(n_per_pop) for p in POPS}
+
+
 def build_parameter_table(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T_SPLIT_MIN,
                           t_split_max=DEFAULT_T_SPLIT_MAX, n_per_pop=DEFAULT_N_PER_POP,
                           L=DEFAULT_L, random_seed=DEFAULT_RANDOM_SEED):
     """
     One row per simulation over num_t_split log-spaced split times, each with its exact
     theoretical Fst between YRI and YRI2 (built from the demography, not simulated).
+
+    n_per_pop may be a scalar (same size for all four populations) or a
+    {pop_name: n} dict for asymmetric sample sizes, e.g. DEFAULT_N_PER_POP_BY_POP.
     """
+    n_dict = _n_per_pop_dict(n_per_pop)
+    N = sum(n_dict.values())
+
     t_values = t_split_values(num_t_split, t_split_min, t_split_max)
     Fst_values = [theoretical_Fst(ooa3_recent_split_demography(t)) for t in t_values]
 
@@ -132,8 +156,9 @@ def build_parameter_table(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T
         "simID": [format_simID(t, f) for t, f in zip(t_values, Fst_values)],
         "t_split": t_values,
         "Fst": Fst_values,
-        "n_per_pop": n_per_pop,
-        "N": 4 * n_per_pop,
+        "n_CEU": n_dict["CEU"], "n_CHB": n_dict["CHB"],
+        "n_YRI": n_dict["YRI"], "n_YRI2": n_dict["YRI2"],
+        "N": N,
         "L": L,
         "random_seed": random_seed + np.arange(num_t_split),
     })
@@ -150,10 +175,11 @@ def build_parameter_table(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T
 
 def simulate_one(simID, t_split, n_per_pop, L, outdir, random_seed, n_workers=1):
     """Simulate one split time and save its genotype matrix as <simID>.npy."""
+    n_dict = _n_per_pop_dict(n_per_pop)
     demography = ooa3_recent_split_demography(t_split)
     X = simulate_haplotypes(
-        demography, n=n_per_pop / 2, L=L, random_seed=random_seed, n_workers=n_workers)
-    X = X.astype(np.bool_)
+        demography, n={p: n / 2 for p, n in n_dict.items()}, L=L,
+        random_seed=random_seed, n_workers=n_workers)
     np.save(os.path.join(outdir, f"{simID}.npy"), X)
     return X.shape[1]
 
@@ -167,7 +193,9 @@ def run(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T_SPLIT_MIN,
 
     Each simulation's L replicate coalescent trees are independent, so simulate_haplotypes
     splits them across n_workers processes; one simulation runs at a time, using all
-    n_workers for it, rather than running multiple simulations concurrently.
+    n_workers for it, rather than running multiple simulations concurrently. For cluster
+    use, run_one() runs a single row instead -- see build_parameter_table for how a task
+    index maps to a row without needing this loop.
     """
     params = build_parameter_table(
         num_t_split=num_t_split, t_split_min=t_split_min, t_split_max=t_split_max,
@@ -176,13 +204,15 @@ def run(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T_SPLIT_MIN,
     if verbose:
         print(f"{len(params)} simulations, t_split in "
               f"[{params.t_split.min():.4e}, {params.t_split.max():.4e}] generations, "
-              f"n_per_pop={n_per_pop}, N={4 * n_per_pop}, L={L}, n_workers={n_workers}")
+              f"n_per_pop={_n_per_pop_dict(n_per_pop)}, N={params.N.iloc[0]}, L={L}, "
+              f"n_workers={n_workers}")
         print(f"output -> {outdir}")
 
     if dry_run:
         return params
 
     os.makedirs(outdir, exist_ok=True)
+    params.to_csv(os.path.join(outdir, "simulation_parameters.csv"), index=False)
 
     bar = tqdm(params.itertuples(), total=len(params), disable=not verbose)
     for i, r in enumerate(bar, start=1):
@@ -194,19 +224,52 @@ def run(num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T_SPLIT_MIN,
         simulate_one(r.simID, r.t_split, n_per_pop, L, outdir, int(r.random_seed),
                      n_workers=n_workers)
 
-    params_path = os.path.join(outdir, "simulation_parameters.csv")
-    params.to_csv(params_path, index=False)
     if verbose:
         print(f"wrote {len(params)} simulations to {outdir}")
-        print(f"parameters -> {params_path}")
     return params
+
+
+def run_one(task_index, num_t_split=DEFAULT_NUM_T_SPLIT, t_split_min=DEFAULT_T_SPLIT_MIN,
+            t_split_max=DEFAULT_T_SPLIT_MAX, n_per_pop=DEFAULT_N_PER_POP, L=DEFAULT_L,
+            outdir=DEFAULT_OUTDIR, random_seed=DEFAULT_RANDOM_SEED,
+            n_workers=1, verbose=True):
+    """
+    Run a single row of the sweep, selected by task_index (0-based) into the same
+    parameter table run() would build. For a SLURM array job: build_parameter_table is
+    cheap (no simulation, just DemographyDebugger calls) and deterministic given the same
+    arguments, so every array task can independently rebuild the full table and index into
+    it -- no shared setup step or param file needs to exist first.
+
+    Skips (rather than overwrites) a simID whose .npy already exists, so a re-submitted or
+    retried task is a no-op.
+    """
+    params = build_parameter_table(
+        num_t_split=num_t_split, t_split_min=t_split_min, t_split_max=t_split_max,
+        n_per_pop=n_per_pop, L=L, random_seed=random_seed)
+    if not (0 <= task_index < len(params)):
+        raise IndexError(f"task_index {task_index} out of range for {len(params)} simulations")
+    r = params.iloc[task_index]
+
+    os.makedirs(outdir, exist_ok=True)
+    out_path = os.path.join(outdir, f"{r.simID}.npy")
+    if os.path.exists(out_path):
+        if verbose:
+            print(f"task {task_index}: {r.simID} already exists, skipping")
+        return
+
+    if verbose:
+        print(f"task {task_index}/{len(params)}: {r.simID}  "
+              f"(t_split={r.t_split:.4g}, Fst={r.Fst:.4e}, N={r.N}, L={L})")
+    simulate_one(r.simID, r.t_split, n_per_pop, L, outdir, int(r.random_seed),
+                 n_workers=n_workers)
 
 
 def main():
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--n-per-pop", type=int, default=DEFAULT_N_PER_POP, help=f"haploid samples per population (default: {DEFAULT_N_PER_POP})")
+    p.add_argument("--n-per-pop", type=int, default=None, help=f"haploid samples per population, same for all four (default: {DEFAULT_N_PER_POP} unless --n-per-pop-by-pop is given)")
+    p.add_argument("--n-per-pop-by-pop", default=None, help="asymmetric haploid sample sizes as CEU=<n>,CHB=<n>,YRI=<n>,YRI2=<n>; overrides --n-per-pop and the default")
     p.add_argument("--L", type=int, default=DEFAULT_L, help=f"number of independent SNPs (default: {DEFAULT_L:g})")
     p.add_argument("--num-t-split", type=int, default=DEFAULT_NUM_T_SPLIT, help=f"number of log-spaced split times (default: {DEFAULT_NUM_T_SPLIT})")
     p.add_argument("--t-split-min", type=float, default=DEFAULT_T_SPLIT_MIN, help=f"lower end of the t_split sweep, in generations (default: {DEFAULT_T_SPLIT_MIN:g})")
@@ -215,10 +278,31 @@ def main():
     p.add_argument("--random-seed", type=int, default=DEFAULT_RANDOM_SEED)
     p.add_argument("--n-workers", type=int, default=DEFAULT_N_WORKERS, help=f"processes to split each simulation's L replicates across (default: {DEFAULT_N_WORKERS}, i.e. cpu_count - 1)")
     p.add_argument("--dry-run", action="store_true", help="report the plan and exit without simulating")
+    p.add_argument("--task-index", type=int, default=None, help="run only this 0-based row of the sweep and exit (for a cluster array job); reads $SLURM_ARRAY_TASK_ID if set and this is omitted but the env var is present")
     args = p.parse_args()
 
+    if args.n_per_pop_by_pop is not None:
+        n_per_pop = {}
+        for tok in args.n_per_pop_by_pop.split(","):
+            pop, n = tok.split("=")
+            n_per_pop[pop.strip()] = int(n)
+    elif args.n_per_pop is not None:
+        n_per_pop = args.n_per_pop
+    else:
+        n_per_pop = DEFAULT_N_PER_POP
+
+    task_index = args.task_index
+    if task_index is None and "SLURM_ARRAY_TASK_ID" in os.environ:
+        task_index = int(os.environ["SLURM_ARRAY_TASK_ID"])
+
+    if task_index is not None:
+        run_one(task_index, num_t_split=args.num_t_split, t_split_min=args.t_split_min,
+                t_split_max=args.t_split_max, n_per_pop=n_per_pop, L=args.L,
+                outdir=args.outdir, random_seed=args.random_seed, n_workers=args.n_workers)
+        return
+
     run(num_t_split=args.num_t_split, t_split_min=args.t_split_min,
-        t_split_max=args.t_split_max, n_per_pop=args.n_per_pop, L=args.L,
+        t_split_max=args.t_split_max, n_per_pop=n_per_pop, L=args.L,
         outdir=args.outdir, random_seed=args.random_seed, n_workers=args.n_workers,
         dry_run=args.dry_run)
 

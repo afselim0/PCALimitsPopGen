@@ -1,0 +1,18 @@
+kind: stepping_stone_2d
+name: default
+random_seed: 42
+n_workers: 8
+fixed:
+  n_per_deme: 64
+  L: 20000
+  Ne: 1000
+sweep:
+  type: stepping_stone
+  K_values: [10]        # 10x10 grid, 100 demes
+  L_values: [20000]
+  num_m: 100
+  min: 0.001
+  max: 0.01
+  
+cluster:
+  job_name: SS_2D          # mem/time/cpus_per_task auto-probed by run_simulation.py --submit

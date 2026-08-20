@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --array=0-{n_rows_minus_1}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem={mem}
+#SBATCH --time={time}
+#SBATCH --output=logs/{job_name}_%A_%a.out
+#SBATCH --error=logs/{job_name}_%A_%a.err
+
+# Auto-generated from {config_path} by sbatch.py -- do not hand-edit the --array bound,
+# regenerate instead if the config's sweep size changes.
+mkdir -p logs
+conda run -n pca_rmt python src/simulations/run_simulation.py {config_path} \
+    --n-workers "${{SLURM_CPUS_PER_TASK}}" \
+    --task-index "${{SLURM_ARRAY_TASK_ID}}" \
+    --outdir {outdir}

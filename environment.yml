@@ -1,0 +1,14 @@
+name: pca_rmt
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - pyyaml
+  - tqdm
+  - msprime
+  - stdpopsim

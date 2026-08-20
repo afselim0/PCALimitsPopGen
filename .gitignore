@@ -6,3 +6,4 @@ results/test_figures
 results/analysis
 *.DS_Store
 *.pyc
+slurm_runs

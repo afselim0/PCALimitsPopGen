@@ -3,7 +3,7 @@
 Data for the three-panel RMT phenomena figure, from the two-population split simulations.
 
 All three panels use N = 400 samples (phi = 0.5) and L_input = 2e4 SNP columns drawn per
-replicate from results/simulations/single_split.
+replicate from results/simulations/split.
 
     A  one spectrum at a representative Fst: the 398 bulk eigenvalues, for the histogram
        and the two Marchenko-Pastur curves (raw L against L_eff).
@@ -38,7 +38,7 @@ from pc_recovery import (load_simulations, subsample, effective_L, SIMULATION_RO
 from sweeps import ANALYSIS_ROOT, split_T
 from utils import compute_sample_covariance
 
-DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "single_split")
+DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "split")
 DEFAULT_NAME = "RMTPhenomena"
 
 N = 400

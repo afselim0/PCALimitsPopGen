@@ -151,7 +151,7 @@ def main():
     p = argparse.ArgumentParser(
         description="PC recovery sweep over the two-population split simulations.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--simdir", default=os.path.join(SIMULATION_ROOT, "single_split"))
+    p.add_argument("--simdir", default=os.path.join(SIMULATION_ROOT, "split"))
     p.add_argument("--name", default="PCRecoverySplit")
     p.add_argument("--sweep", choices=("N", "ratios"), default="N")
     p.add_argument("--num-replicates", type=int, default=DEFAULT_NUM_REPLICATES)

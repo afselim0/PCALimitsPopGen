@@ -79,7 +79,8 @@ def load_counts(simdir):
     if not paths:
         raise FileNotFoundError(
             f"no *_counts.npy in {simdir}. Run:\n"
-            f"    python src/simulations/panmictic.py")
+            f"    python src/simulations/run_simulation.py "
+            f"src/simulations/configs/panmictic.yaml")
     arrays = [np.load(p, mmap_mode="r") for p in paths]
     widest = int(np.argmax([a.size for a in arrays]))
     path = paths[widest]

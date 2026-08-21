@@ -72,6 +72,75 @@ def structure_eigenvalues(K, M, n_per_deme, dimension=1):
     return np.sort(N / (M * K_demes * mu))[::-1]
 
 
+def closed_form_eigenvector_1d(k, K, n_per_deme):
+    """
+    u_k(j) = cos(k*pi/K * (j + 1/2)), j = 0..K-1, lifted to sample space and normalized.
+
+    k = 1..K-1 indexes the modes in the same ascending-mu / descending-nu order as
+    laplacian_eigenvalues; k = 1 is the leading structure axis. Verified numerically
+    against theoretical_eigenvectors(stepping_stone_T(...)): cosine similarity 1.0 at
+    K=25, n_per_deme=64.
+    """
+    j = np.arange(K)
+    u = np.cos(k * np.pi / K * (j + 0.5))
+    lifted = np.repeat(u, n_per_deme)
+    return lifted / np.linalg.norm(lifted)
+
+
+def closed_form_eigenvector_2d(k, l, K, n_per_deme):
+    """
+    u_kl(p, q) = cos(k*pi/K*(p+1/2)) * cos(l*pi/K*(q+1/2)), a K x K grid of demes
+    ordered row-major (p*K + q, matching demographies.stepping_stone_2d), lifted to
+    sample space and normalized.
+
+    (k, l) = (1, 0) and (0, 1) are the degenerate leading pair. Verified numerically:
+    the (1,0)/(0,1) pair spans the same subspace as the leading multiplet of
+    theoretical_eigenvectors(stepping_stone_T(...)) to within ~1e-4 (numerical
+    resistance-distance asymmetry), at K=9, n_per_deme=64.
+    """
+    p, q = np.meshgrid(np.arange(K), np.arange(K), indexing="ij")
+    u = (np.cos(k * np.pi / K * (p + 0.5)) * np.cos(l * np.pi / K * (q + 0.5))).ravel()
+    lifted = np.repeat(u, n_per_deme)
+    return lifted / np.linalg.norm(lifted)
+
+
+def closed_form_spectrum(K, M, n_per_deme, dimension=1):
+    """
+    Closed-form (mode, eigenvalue, eigenvector) triples, descending eigenvalue.
+
+    In 1D modes are k = 1..K-1. In 2D modes are (k, l) with 0 <= k, l <= K-1, excluding
+    (0, 0) (the mean-centering direction); the eigenvalue depends on (k, l) only through
+    mu_k + mu_l, so nu_{kl} = nu_{lk} and (1, 0)/(0, 1) are always the leading degenerate
+    pair.
+
+    Returns:
+        (modes, nu, V): modes is a list of int (1D) or (int, int) tuples (2D); nu is the
+        matching eigenvalue array; V is the (N, K_demes - 1) matrix of lifted, normalized
+        eigenvectors, columns in the same order as modes and nu.
+    """
+    K_demes = num_demes(K, dimension)
+    N = n_per_deme * K_demes
+
+    if dimension == 1:
+        modes = list(range(1, K))
+        mu = 4 * np.sin(np.pi * np.arange(1, K) / (2 * K)) ** 2
+        nu = N / (M * K_demes * mu)
+        V = np.column_stack([closed_form_eigenvector_1d(k, K, n_per_deme) for k in modes])
+    elif dimension == 2:
+        mu_1d = 4 * np.sin(np.pi * np.arange(K) / (2 * K)) ** 2  # mu_1d[0] = 0
+        modes = [(k, l) for k in range(K) for l in range(K) if not (k == 0 and l == 0)]
+        mu = np.array([mu_1d[k] + mu_1d[l] for k, l in modes])
+        nu = N / (M * K_demes * mu)
+        V = np.column_stack([closed_form_eigenvector_2d(k, l, K, n_per_deme)
+                             for k, l in modes])
+    else:
+        raise ValueError(f"dimension must be 1 or 2, got {dimension}")
+
+    order = np.argsort(nu)[::-1]
+    modes = [modes[i] for i in order]
+    return modes, nu[order], V[:, order]
+
+
 def full_spectrum(K, M, n_per_deme, dimension=1):
     """
     Structure eigenvalues followed by the N - K_demes floor levels.

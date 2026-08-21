@@ -36,14 +36,14 @@ MAX_ITER = 20
 
 
 def _demography(t_split):
-    """OOA3 with the YRI2 split, loaded from the simulation script by path."""
+    """OOA3 with the YRI2 split, loaded from the simulation kind module by path."""
     import importlib.util
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(root, "simulations", "OOA3_recent_african_split.py")
+    path = os.path.join(root, "simulations", "demographies", "african_split.py")
     spec = importlib.util.spec_from_file_location("_ooa3", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.ooa3_recent_split_demography(t_split)
+    return mod.demography(t_split)
 
 
 # Splitting YRI2 off YRI at t_split leaves the CEU/CHB/YRI history untouched, so the six

@@ -26,7 +26,7 @@ which is worth stating that way rather than as a bare ratio:
     under-sampling one sister costs detectability in proportion to *that* fraction however
     many samples the other sister contributes. That is the design consequence.
 
-results/simulations/OOA3_recent_african_split realizes exactly this structure: YRI2 is
+results/simulations/african_split realizes exactly this structure: YRI2 is
 built from YRI by copying its migration rates, so T_{YRI,c} = T_{YRI2,c} for c in
 {CEU, CHB} and tau_YRI = tau_YRI2 by symmetry.
 
@@ -57,9 +57,16 @@ eigenvalue.
 Sample order in the simulations is alphabetical: CEU, CHB, YRI, YRI2, so the sister pair is
 blocks 2 and 3.
 
+nu_exact is also computed per cell (exact_sister_nu.exact_sister_nu, from the full 4x4
+coalescent-time matrix, not the eps_a=0 approximation), so nu_meas can be checked against
+both the exact theoretical eigenvalue and the N*H*Fst approximation separately -- the first
+tests whether measurement recovers theory, the second tests what the approximation costs
+(see SisterApproximation.py for that comparison in isolation, theory vs theory).
+
 Outputs (results/analysis/SisterEigenvalue):
     cells.csv    one row per (simulation, design, replicate)
-    summary.csv  medians per cell, with the ratio nu_meas/nu_pred
+    summary.csv  medians per cell, with the ratios nu_meas/nu_pred and nu_meas/nu_exact
+    coal_times.npz  cached coalescent-time matrices, keyed by t_split
 """
 import argparse
 import os
@@ -72,16 +79,17 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from pc_recovery import load_simulations, subsample, effective_L, SIMULATION_ROOT
+from exact_sister_nu import cached_coal_times, exact_sister_nu
 from sweeps import ANALYSIS_ROOT
 from utils import compute_sample_covariance
 
-DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "OOA3_recent_african_split")
+DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "african_split")
 DEFAULT_NAME = "SisterEigenvalue"
 
 POPS = ["CEU", "CHB", "YRI", "YRI2"]
 SISTER = (2, 3)                  # YRI, YRI2 in alphabetical block order
 SPECTRUM_SCALE = 0.5             # compute_sample_covariance places the floor at 2
-N_PER_POP_FULL = 500
+N_PER_POP_FULL = 5000            # per-population sample count in african_split config
 
 DEFAULT_NUM_REPLICATES = 5
 DEFAULT_SEED = 0
@@ -219,6 +227,13 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, L=DEFAULT_L,
     # each -- running all designs at all Fst would multiply the cost for no extra claim.
     centre_only = {"N", "H", "scatter"}
 
+    # The exact structure eigenvalue (from the full 4x4 coalescent-time matrix), for
+    # comparison against both the measurement and the N*H*Fst approximation. Only depends
+    # on t_split, so it's computed once per distinct t_split among the Fst values used.
+    t_splits = sorted(params.t_split.iloc[fst_idx].unique())
+    coal_cache = os.path.join(outdir, "coal_times.npz")
+    Tmap = cached_coal_times(t_splits, coal_cache, verbose=verbose)
+
     rows = []
     total = sum(len(fst_idx) if fam == "Fst" else 1 for _, fam, _ in designs)
     bar = tqdm(total=total * num_replicates, disable=not verbose, desc="cells")
@@ -226,29 +241,34 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, L=DEFAULT_L,
         idxs = fst_idx if family == "Fst" else fst_idx[:1]
         for i in idxs:
             Fst = float(params.Fst.iloc[i])
+            t_split = float(params.t_split.iloc[i])
             nu_pred = predicted_nu(Fst, n)
+            nu_exact = exact_sister_nu(Tmap[t_split], n, sister_axis(n))["nu_exact"]
             for rep in range(num_replicates):
                 rng = np.random.default_rng([seed, int(i), rep, len(label)])
                 m = measure(arrays[i], n, L, rng)
                 rows.append(dict(
-                    simID=params.simID.iloc[i], t_split=float(params.t_split.iloc[i]),
+                    simID=params.simID.iloc[i], t_split=t_split,
                     Fst=Fst, design=label, family=family, rep=rep,
                     N=int(n.sum()), n_sister1=int(n[SISTER[0]]), n_sister2=int(n[SISTER[1]]),
-                    n_other=int(n[0]), H=harmonic_phi(n), nu_pred=nu_pred, **m))
+                    n_other=int(n[0]), H=harmonic_phi(n), nu_pred=nu_pred,
+                    nu_exact=nu_exact, **m))
                 bar.update(1)
     bar.close()
 
     df = pd.DataFrame(rows)
     df["ratio"] = df.nu_meas / df.nu_pred
     df["ratio_unnormed"] = df.nu_meas_unnormed / df.nu_pred
+    df["ratio_exact"] = df.nu_meas / df.nu_exact
     df["nu_c"] = np.sqrt(df.N / df.L_eff)
     df["above_threshold"] = df.nu_pred > df.nu_c
 
     summary = df.groupby(["design", "family", "simID", "Fst", "N", "H",
-                          "nu_pred"]).agg(
+                          "nu_pred", "nu_exact"]).agg(
         nu_meas=("nu_meas", "median"), nu_meas_sd=("nu_meas", "std"),
         nu_meas_unnormed=("nu_meas_unnormed", "median"),
         ratio=("ratio", "median"), ratio_unnormed=("ratio_unnormed", "median"),
+        ratio_exact=("ratio_exact", "median"),
         floor=("floor", "median"), alpha_meas=("alpha_meas", "median"),
         overlap=("overlap", "median"),
         rank=("rank", "median"), L_eff=("L_eff", "median"),
@@ -264,6 +284,9 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, L=DEFAULT_L,
               f"IQR {summary.ratio.quantile(.25):.4f}-{summary.ratio.quantile(.75):.4f}")
         print(f"  (floor-normalized; without it: "
               f"{summary.ratio_unnormed.median():.4f})")
+        print(f"ratio nu_meas/nu_exact: median {summary.ratio_exact.median():.4f}, "
+              f"IQR {summary.ratio_exact.quantile(.25):.4f}-"
+              f"{summary.ratio_exact.quantile(.75):.4f}")
         print(f"measured floor 1/(1+alpha): median {summary.floor.median():.4f} "
               f"-> alpha = {summary.alpha_meas.median():.4f}")
         print(f"overlap with predicted u_1: median {summary.overlap.median():.4f}, "

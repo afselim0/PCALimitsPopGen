@@ -6,7 +6,7 @@ Measures how well PCA recovers the sister-separating axis
 
     u_1 = (sqrt(phi_2), -sqrt(phi_1), 0, ..., 0) / sqrt(phi_1 + phi_2)
 
-on results/simulations/OOA3_recent_african_split (K = 4: CEU, CHB, YRI, YRI2, in that
+on results/simulations/african_split (K = 4: CEU, CHB, YRI, YRI2, in that
 alphabetical block order; YRI/YRI2 are the sisters). Detectability is governed by
 
     nu_1 = N * H * Fst,   H = 2*phi_1*phi_2/(phi_1+phi_2) = harmonic mean(phi_1, phi_2)
@@ -37,8 +37,8 @@ completely undetectable under the lopsided design and cleanly recovered under th
 one, with the same sequencing effort. A harmonic mean is dominated by its smaller argument,
 so the 195 extra samples in the first design buy essentially nothing.
 
-Sample-size cap. Each population was simulated with 500 haploid samples, so N <= 2000 and
-any design needs every n_a <= 500. The grids below respect that; run() asserts it.
+Sample-size cap. Each population was simulated with 5000 haploid samples, so N <= 20000 and
+any design needs every n_a <= 5000. The grids below respect that; run() asserts it.
 
 Fst is always the theoretical value from the filename, never re-estimated.
 
@@ -73,7 +73,7 @@ SISTER, POPS = _se.SISTER, _se.POPS
 harmonic_phi, sister_axis = _se.harmonic_phi, _se.sister_axis
 N_PER_POP_FULL = _se.N_PER_POP_FULL
 
-DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "OOA3_recent_african_split")
+DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "african_split")
 DEFAULT_NAME = "SisterPCAlignment"
 
 DEFAULT_L = 50000

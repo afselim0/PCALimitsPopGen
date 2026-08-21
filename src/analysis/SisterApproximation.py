@@ -5,7 +5,7 @@ The harmonic-mean approximation nu_1 = N*H*Fst against the exact eigenvalue.
 nu_1 = N*H*Fst was derived under eps_a = 0 and tau_a/tau_bar = 1. This measures what those
 assumptions cost, with no simulation in the loop: both sides are theoretical, so the
 comparison is exact and noise-free, and the parameter range is limited only by arithmetic
-rather than by the 500-samples-per-population simulation cap.
+rather than by the 5000-samples-per-population simulation cap.
 
 The exact value is the structure eigenvalue of G = -H T H / T_bar built from the full
 4 x 4 OOA3 coalescent-time matrix, normalized by the measured floor (so both sides are in

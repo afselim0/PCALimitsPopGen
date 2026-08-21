@@ -128,11 +128,15 @@ def subsample(Z, n, L=None, rng=None):
         raise ValueError(f"requested {n.max()} samples but only {n_per_pop} are available "
                          f"per subpopulation")
 
-    idx = np.concatenate([a * n_per_pop + rng.choice(n_per_pop, n_a, replace=False)
-                          for a, n_a in enumerate(n)])
-    cols = rng.choice(Z.shape[1], L, replace=False) if L is not None and L < Z.shape[1] \
-        else slice(None)
-    sub = np.asarray(Z[idx][:, cols], dtype=np.float32)
+    idx = np.sort(np.concatenate([a * n_per_pop + rng.choice(n_per_pop, n_a, replace=False)
+                                  for a, n_a in enumerate(n)]))
+    cols = np.sort(rng.choice(Z.shape[1], L, replace=False)) \
+        if L is not None and L < Z.shape[1] else slice(None)
+    # A single np.ix_ index avoids materializing the full-width row slice that
+    # Z[idx][:, cols] would read off the memory-mapped file; sorted indices keep the
+    # mmap reads close to sequential instead of scattering across the file.
+    sub = np.asarray(Z[np.ix_(idx, cols)] if isinstance(cols, np.ndarray) else Z[idx][:, cols],
+                      dtype=np.float32)
     freq = sub.mean(axis=0)
     return sub[:, (freq > 0) & (freq < 1)]
 

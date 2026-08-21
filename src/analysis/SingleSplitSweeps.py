@@ -2,7 +2,7 @@
 """
 PC1 recovery across the two-population split sweep, as a function of N and of phi.
 
-Two sweeps over results/simulations/single_split, both at L_input = 2e4 SNP columns per
+Two sweeps over results/simulations/split, both at L_input = 2e4 SNP columns per
 replicate, both recording the PC1 overlap against the theoretical structure axis for every
 one of the 100 Fst values:
 
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pc_recovery import SIMULATION_ROOT
 from sweeps import ANALYSIS_ROOT, run_sweep, split_T
 
-DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "single_split")
+DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "split")
 DEFAULT_NAME = "SingleSplitSweeps"
 
 DEFAULT_L = int(2e4)

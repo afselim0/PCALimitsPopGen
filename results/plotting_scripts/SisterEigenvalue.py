@@ -38,6 +38,33 @@ C_PRED = okabe_ito[0]        # blue: the prediction
 C_FAM_B = okabe_ito[2]       # green: the second sampling family in panel D
 
 
+def panel_verify(ax, s, x_col, x_label, title):
+    """
+    Empirical median (nu_meas) against a theoretical formula, one point per cell.
+
+    Used for both the exact formula (nu_exact, from the full coalescent-time matrix) and
+    the harmonic-mean approximation (nu_pred = N*H*Fst) -- the y=x line is the same
+    zero-parameter check either way, just against a different theoretical value.
+    """
+    lim = [min(s[x_col].min(), s.nu_meas.min()) * 0.8,
+           max(s[x_col].max(), s.nu_meas.max()) * 1.2]
+    ax.plot(lim, lim, ':', color='0.35', linewidth=1.4, zorder=1, label=r'$y=x$')
+    for fam, marker in [("Fst", "o"), ("N", "s"), ("H", "^"), ("scatter", "D")]:
+        d = s[s.family == fam]
+        if d.empty:
+            continue
+        ax.scatter(d[x_col], d.nu_meas, s=22, marker=marker, facecolors='none',
+                   edgecolors=C_MEAS, linewidths=1.0, zorder=3, label=fam)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(r'measured $\nu_1$')
+    ax.set_title(title)
+    ax.legend(loc='upper left', fontsize=7.5, frameon=False)
+
+
 def panel_collapse(ax, s):
     """nu_meas vs nu_pred over every cell."""
     lim = [min(s.nu_pred.min(), s.nu_meas.min()) * 0.8,

@@ -6,10 +6,11 @@ A  PC alignment vs Fst at nine sample sizes N, with the sisters held at phi_1 = 
 B  PC alignment vs Fst at ten sampling balances, N = 1000 and the sisters sharing 200
    samples between them, split from (5, 195) through (100, 100).
 
-Solid lines are the measured median over replicates; dashed lines are the BBP prediction.
-
-The prediction uses the **exact** nu from the full coalescent-time matrix, not N*H*Fst,
-which assumes eps_a = 0 and understates it by nu_exact = 1.379*(N H Fst) + 0.344.
+Solid lines are the measured median over replicates. Dashed lines are the BBP prediction
+using the **exact** nu from the full coalescent-time matrix; dotted lines use the
+approximate nu = N*H*Fst (eps_a = 0), which understates the exact value by
+nu_exact = 1.379*(N H Fst) + 0.344 -- the gap between the dashed and dotted curves is that
+approximation error alone, since both share the same measured gamma.
 
 No floor is applied to the prediction -- see bbp_overlap. The measured curves plateau at a
 nonzero value at low Fst; that plateau is set by the estimator (argmax over candidate
@@ -76,7 +77,8 @@ def bbp_overlap(nu, gamma):
 
 def panel(ax, df, key, cmap, label, title):
     """
-    One sweep: measured median as a solid line, BBP prediction dashed, per level.
+    One sweep: measured median as a solid line, BBP prediction using the exact nu dashed
+    and using the approximate nu (N*H*Fst) dotted, per level.
 
     Levels are coloured by the swept parameter on a shared normalization, so the colourbar
     reads directly onto the curves.
@@ -89,6 +91,8 @@ def panel(ax, df, key, cmap, label, title):
         color = cmap(norm(level))
         ax.plot(d.Fst, d.cos_median, "-", color=color, linewidth=1.5, zorder=3)
         ax.plot(d.Fst, bbp_overlap(d.nu, d.gamma), "--", color=color,
+                linewidth=1.1, alpha=0.85, zorder=2)
+        ax.plot(d.Fst, bbp_overlap(d.nu_approx, d.gamma), ":", color=color,
                 linewidth=1.1, alpha=0.85, zorder=2)
 
     ax.set_xscale("log")
@@ -129,6 +133,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
                  label=f"simulation (median of {n_reps})")
     axes[0].plot([], [], "--", color="0.35", linewidth=1.1,
                  label=r"BBP prediction (exact $\nu$)")
+    axes[0].plot([], [], ":", color="0.35", linewidth=1.1,
+                 label=r"BBP prediction (approx. $\nu = NHF_{ST}$)")
     # Lower left: the curves occupy the upper left at high Fst and the legend collided there.
     axes[0].legend(loc="lower right", fontsize=9, frameon=False)
 

@@ -1,0 +1,28 @@
+# 2D stepping stone, every deme sampled, varying n-per-deme.
+#
+# The first two eigenvalues are exactly degenerate, so no canonical basis exists inside
+# the pair and only the subspace is well defined: k_lead = 2 and the comparison is by
+# principal angles (procrustes-aligned), not per-axis.
+model: stepping_stone
+name: ss2d_vary_n
+simdir: results/simulations/stepping_stone_2d/K9
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  dimension: 2
+  L: 10000
+  L_polymorphic: true
+
+sampling:
+  fixed: {deme_fraction: 1.0}
+  vary:
+    param: n_per_deme
+    values: [2, 4, 8, 16, 32, 64]
+
+cluster:
+  job_name: sw_ss2d_n
+  time: "03:00:00"   # K^2 = 81 demes, so n=64 gives N=5184 -- the largest cell anywhere
+  mem: 6G            # in these sweeps, and eigh cost goes as N^3
+  cpus_per_task: 1

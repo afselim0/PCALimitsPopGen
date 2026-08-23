@@ -8,3 +8,7 @@ results/analysis
 *.pyc
 slurm_runs
 logs/
+# Sweep-analysis stage-2/3 outputs (large, regenerable from the configs)
+results/sweeps/
+results/sweep_summaries/
+slurm_runs/sweeps/

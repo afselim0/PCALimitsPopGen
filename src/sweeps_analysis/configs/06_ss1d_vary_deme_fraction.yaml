@@ -1,0 +1,29 @@
+# 1D stepping stone, n-per-deme fixed, varying the proportion of demes sampled.
+#
+# phi is redrawn per replicate, so the theoretical axis changes per replicate:
+# models/stepping_stone.py sets per_replicate and supplies cell_replicates(). pc_recovery
+# takes a single fixed V_theory and cannot express this.
+model: stepping_stone
+name: ss1d_vary_deme_fraction
+simdir: results/simulations/stepping_stone_1d/K25
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  dimension: 1
+  L: 10000
+  L_polymorphic: false   # the random-deme path draws L as a pre-filter count, matching
+                         # src/analysis/SteppingStoneRandomSampling
+
+sampling:
+  fixed: {n_per_deme: 8}
+  vary:
+    param: deme_fraction
+    values: [0.2, 0.4, 0.6, 0.8, 1.0]
+
+cluster:
+  job_name: sw_ss1d_phi
+  time: "00:45:00"   # N <= 200 throughout; cheap
+  mem: 3G
+  cpus_per_task: 1

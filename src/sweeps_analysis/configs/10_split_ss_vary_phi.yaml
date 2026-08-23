@@ -1,0 +1,29 @@
+# Recent spatial structure: spatial-axis recovery vs 1/M, varying phi (the structured
+# population's share of the total sample) at fixed n-per-deme-B.
+#
+# phi here is the total sample fraction from the structured demes B -- not the
+# fraction-of-demes-sampled phi of configs 06/08. Every deme is always sampled; phi only
+# trades n_A against B's total. Cells asking for more of A than was simulated are skipped
+# by the model rather than clamped.
+model: split_stepping_stone
+name: split_ss_vary_phi
+simdir: results/simulations/split_stepping_stone/K9
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  L: 10000
+  L_polymorphic: false
+
+sampling:
+  fixed: {n_per_deme_B: 4}
+  vary:
+    param: phi
+    values: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+cluster:
+  job_name: sw_splitss_phi
+  time: "01:30:00"   # n_per_deme_B = 4 caps N at ~3240 (phi = 0.1)
+  mem: 5G
+  cpus_per_task: 1

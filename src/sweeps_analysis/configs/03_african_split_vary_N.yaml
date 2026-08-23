@@ -1,0 +1,29 @@
+# OOA3 sister pair: PC3 alignment vs Fst, varying total N at fixed sister fraction.
+# Matches src/analysis/SisterPCAlignment.py's vary_N sweep (phi_1 = phi_2 = 0.05).
+#
+# The expensive config: prepare() runs pop_coal_times, an msprime numerical integration
+# per population pair, ~15-20 min for this task's t_split. That is paid once per array
+# task, which is what the array-over-simulations layout buys.
+model: african_split
+name: african_split_vary_N
+simdir: results/simulations/african_split
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  L: 50000
+  L_polymorphic: false   # as the existing driver: the exact-width path would materialise
+                         # a full-width slice of a 4 GB .npy
+
+sampling:
+  fixed: {phi_sister: 0.05}
+  vary:
+    param: N
+    values: [200, 300, 400, 500, 600, 700, 800, 900, 1000]
+
+cluster:
+  job_name: sw_ooa3_N
+  time: "02:00:00"   # ~20 min coalescent integration + 9 cells of subsample/eigh
+  mem: 6G            # 4 GB .npy is mmap'd, not resident; measured peak on split was 1.9G
+  cpus_per_task: 1

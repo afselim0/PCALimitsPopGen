@@ -1,0 +1,25 @@
+# 1D stepping stone, every deme sampled, varying n-per-deme.
+# Matches src/analysis/SteppingStoneEvenSampling.py at dimension 1.
+model: stepping_stone
+name: ss1d_vary_n
+simdir: results/simulations/stepping_stone_1d/K25
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  dimension: 1
+  L: 10000            # held genuinely fixed across n so gamma = N/L_eff is the only thing
+  L_polymorphic: true # moving; at K=25, n=2 leaves ~11.3k polymorphic, so 10000 clears it
+
+sampling:
+  fixed: {deme_fraction: 1.0}
+  vary:
+    param: n_per_deme
+    values: [2, 4, 8, 16, 32, 64]
+
+cluster:
+  job_name: sw_ss1d_n
+  time: "01:30:00"   # n=64 gives N=1600, the dominant cell (eigh cost ~ N^3)
+  mem: 4G
+  cpus_per_task: 1

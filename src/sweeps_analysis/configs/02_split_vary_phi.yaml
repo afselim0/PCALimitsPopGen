@@ -1,0 +1,24 @@
+# Two-population split: PC1 overlap vs Fst, varying the sampling fraction phi at fixed N.
+# Matches src/analysis/SingleSplitSweeps.py's vary_phi sweep (phi = 0.05..0.5, N = 200).
+model: split
+name: split_vary_phi
+simdir: results/simulations/split
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  L: 20000
+  L_polymorphic: false
+
+sampling:
+  fixed: {N: 200}
+  vary:
+    param: phi
+    values: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+
+cluster:
+  job_name: sw_split_phi
+  time: "00:40:00"
+  mem: 3G
+  cpus_per_task: 1

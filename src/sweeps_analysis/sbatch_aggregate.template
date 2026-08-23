@@ -1,0 +1,21 @@
+#!/bin/bash
+#SBATCH --job-name={job_name}_agg
+#SBATCH --account=pi-jnovembre
+#SBATCH --partition=jnovembre
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4G
+#SBATCH --time=00:20:00
+#SBATCH --output=slurm_runs/sweeps/{job_name}_agg_%j.out
+#SBATCH --error=slurm_runs/sweeps/{job_name}_agg_%j.err
+
+# Auto-generated from {config_path} by sbatch.py. Submitted with
+# --dependency=afterok:<array job id> so it runs once every task has succeeded.
+mkdir -p slurm_runs/sweeps
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+source /software/bin/miniconda3/etc/profile.d/conda.sh
+conda activate /project/jnovembre/afselim/pca_rmt
+python src/sweeps_analysis/run_sweep_analysis.py {config_path} \
+    --aggregate --outdir {outdir}

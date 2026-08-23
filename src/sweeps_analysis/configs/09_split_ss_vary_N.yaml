@@ -1,0 +1,25 @@
+# Recent spatial structure (panmictic A + a K x K grid B): spatial-axis recovery vs 1/M,
+# varying n-per-deme-B at a fixed 50/50 split between the structured and panmictic halves.
+# Matches src/analysis/RecentSpatialOverlapVsM.py's vary_n sweep.
+model: split_stepping_stone
+name: split_ss_vary_N
+simdir: results/simulations/split_stepping_stone/K9
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  L: 10000
+  L_polymorphic: false
+
+sampling:
+  fixed: {phi: 0.5}
+  vary:
+    param: n_per_deme_B
+    values: [2, 4, 8, 16, 32, 64]
+
+cluster:
+  job_name: sw_splitss_N
+  time: "03:00:00"   # phi=0.5 means n_A = n_per_deme_B * K^2, so n=64 gives N=10368 --
+  mem: 8G            # the largest N in any sweep, and select_by_overlap needs the full
+  cpus_per_task: 1   # eigendecomposition rather than a few leading vectors

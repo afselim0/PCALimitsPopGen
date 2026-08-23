@@ -1,0 +1,25 @@
+# 2D stepping stone, n-per-deme fixed, varying the proportion of demes sampled.
+# Per-replicate deme resampling, as in config 06.
+model: stepping_stone
+name: ss2d_vary_deme_fraction
+simdir: results/simulations/stepping_stone_2d/K9
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  dimension: 2
+  L: 10000
+  L_polymorphic: false
+
+sampling:
+  fixed: {n_per_deme: 8}
+  vary:
+    param: deme_fraction
+    values: [0.2, 0.4, 0.6, 0.8, 1.0]
+
+cluster:
+  job_name: sw_ss2d_phi
+  time: "01:00:00"   # N <= 648
+  mem: 4G
+  cpus_per_task: 1

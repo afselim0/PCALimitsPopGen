@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --account=pi-jnovembre
+#SBATCH --partition=jnovembre
+#SBATCH --array=0-{n_tasks_minus_1}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem={mem}
+#SBATCH --time={time}
+#SBATCH --output=slurm_runs/sweeps/{job_name}_%A_%a.out
+#SBATCH --error=slurm_runs/sweeps/{job_name}_%A_%a.err
+
+# Auto-generated from {config_path} by sbatch.py -- do not hand-edit the --array bound,
+# regenerate instead if the config's simulation set changes.
+mkdir -p slurm_runs/sweeps
+
+# One BLAS thread per task. Each array task asks for one CPU, but numpy's default is one
+# thread per core (64 here), and those threads then contend for the single allocated core:
+# measured 6.1s vs 0.10s for a single N=100 eigendecomposition, a 61x penalty. Every cell
+# of every sweep is an eigendecomposition, so this line is load-bearing, not hygiene.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+source /software/bin/miniconda3/etc/profile.d/conda.sh
+conda activate /project/jnovembre/afselim/pca_rmt
+python src/sweeps_analysis/run_sweep_analysis.py {config_path} \
+    --task-index "${{SLURM_ARRAY_TASK_ID}}" \
+    --outdir {outdir}

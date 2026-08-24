@@ -24,9 +24,11 @@ sampling:
 
 cluster:
   job_name: sw_splitss_N
-  # The old grid measured 7 min / 1.37G peak per task. This grid carries ~12x the N^3
-  # work (largest cell N=9720 vs 5184), projecting ~80 min; 3h leaves headroom. Peak is
-  # the N x L subsample (0.39G) plus the N x N GRM (0.76G) plus eigh workspace.
-  time: "03:00:00"
-  mem: 6G
+  # Measured on a real task (sim99, all six cells): 51 min wall, 4.44G peak RSS.
+  # Both numbers are worth pinning rather than deriving -- an arrays-only estimate
+  # (subsample + GRM = 1.15G at n=60) understated the true peak by ~4x, because eigh
+  # workspace, LAPACK scratch and float64 copies dominate at these N. The n=60 cell
+  # alone is ~49% of the N^3 work, so the tail is where both time and memory land.
+  time: "02:00:00"   # 51 min measured, 2.4x margin for a loaded node
+  mem: 8G            # 4.44G measured, 1.8x margin
   cpus_per_task: 1

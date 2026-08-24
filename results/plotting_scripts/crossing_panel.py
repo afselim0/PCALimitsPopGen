@@ -1,37 +1,33 @@
 #%%
 """
-Draw one overlap-vs-swept-parameter panel from per-replicate measurements.
+Draw one overlap-vs-swept-parameter panel from the pre-fitted summary files.
 
-The shared panel behind the overlap figures. Each curve of the sweep (a value of N, phi, or
-n-per-deme -- the *curve parameter*) contributes a cloud of per-replicate cos^2 values
-across the *swept parameter* on the x axis (Fst or 1/M), and is drawn as three things:
+The shared panel behind the overlap figures. Each curve of the sweep (a value of N, phi or
+n-per-deme -- the *curve parameter*) is drawn across the *swept parameter* on the x axis
+(Fst or 1/M) as:
 
-    1. a solid regression line with a shaded confidence band, fitted through every
-       replicate rather than through their medians (crossing_fit.fit_with_band)
-    2. a thin solid vertical line at the swept value where that fit reaches the target
-       cos^2 (default 0.9) -- the measured detection point
+    1. the shape-constrained scam fit through every replicate, with its 95% confidence band
+    2. a filled marker sitting on the curve where it reaches the target cos^2 (0.9) -- the
+       measured detection point, on the line rather than beside it
     3. a dashed vertical line at the same crossing predicted by theory
 
-Replacing the old "median line + prediction line at every x" pair: the comparison between
-measurement and theory is now a comparison between two vertical lines, which is what the
-detection claim actually is, and the band shows how well the crossing is resolved.
+The comparison between measurement and theory is the horizontal gap between the marker and
+the dashed line, which is what the detection claim actually is.
 
-The theoretical crossing is supplied by the caller as a function of the swept value,
-because nu(x) differs per demography; crossing_fit.theory_crossing inverts it numerically
-against src/threshold_and_overlap.
+Curves are keyed by a discrete legend, not a continuous colourbar: the curve parameter takes
+a handful of chosen values, not a continuum, and a legend states them exactly instead of
+asking the reader to interpolate a colour ramp.
 
-Colour encodes the curve parameter through a colourbar rather than a legend, since ten
-curves would otherwise need ten legend entries per panel.
-
-Crossings are recomputed here so a figure can be redrawn from the replicate file alone;
-they match the *_crossings.csv the analysis writes, which is the place to read them as
-numbers.
+This module renders columns and holds no fitting or theory of its own -- stage 3
+(src/sweeps_analysis/summarise.py) produces curves.csv, crossings.csv and points.csv.
 """
 import os
 import sys
 
 import numpy as np
 from matplotlib import cm, colors
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 # Appended, not inserted: eleven analysis scripts share a filename with their plotting
 # counterpart (SingleSplitSweeps.py, SisterPCAlignment.py, ...), so putting src/analysis
@@ -41,13 +37,42 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "src", "analysis"))
 from crossing_fit import DEFAULT_TARGET, fit_with_band, theory_crossing
 
-POINT_KW = dict(s=4, alpha=0.18, linewidths=0, zorder=1)
-# The band is frequently narrower than the line itself at 10-20 replicates, so it needs
-# enough alpha to register as more than a smudge where it is thin.
-BAND_KW = dict(alpha=0.30, linewidth=0, zorder=2)
-FIT_KW = dict(linewidth=1.6, zorder=3)
-EMP_VLINE_KW = dict(linewidth=1.0, zorder=4)
+POINT_KW = dict(s=4, alpha=0.16, linewidths=0, zorder=1)
+BAND_KW = dict(alpha=0.25, linewidth=0, zorder=2)
+FIT_KW = dict(linewidth=1.7, zorder=3)
+# The crossing is marked on the curve itself. A white edge keeps it legible where several
+# curves converge at the right of the panel.
+CROSS_MARKER_KW = dict(marker="o", markersize=7, markeredgecolor="white",
+                       markeredgewidth=1.0, zorder=6, linestyle="none")
 THEORY_VLINE_KW = dict(linewidth=1.3, linestyle=(0, (4, 2)), zorder=4)
+
+# Okabe-Ito, matching plotting_style's cycle: discrete curves get discrete colours.
+DISCRETE_COLORS = ["#0072B2", "#D55E00", "#009E73", "#E69F00",
+                   "#CC79A7", "#56B4E9", "#F0E442", "#000000"]
+
+
+def level_colors(levels, cmap=None):
+    """
+    One colour per curve, and a formatter for its legend label.
+
+    A sequential colormap is sampled across the levels when one is given, so panels keep
+    the ordered light-to-dark reading that suits an ordered parameter; otherwise the
+    categorical Okabe-Ito cycle is used.
+    """
+    levels = list(levels)
+    if cmap is not None and len(levels) > 1:
+        # Avoid the extreme ends of a sequential map: the palest is invisible on white and
+        # the darkest is hard to tell from the next one down.
+        return [cmap(0.12 + 0.76 * i / (len(levels) - 1)) for i in range(len(levels))]
+    if cmap is not None:
+        return [cmap(0.5)]
+    return [DISCRETE_COLORS[i % len(DISCRETE_COLORS)] for i in range(len(levels))]
+
+
+def format_level(v):
+    """Legend label for a curve parameter value: integers stay integers."""
+    f = float(v)
+    return str(int(round(f))) if abs(f - round(f)) < 1e-9 else f"{f:g}"
 
 
 def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TARGET,
@@ -129,24 +154,27 @@ def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TA
 
 def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                                 cmap=None, cbar_label="", target=DEFAULT_TARGET,
-                                levels=None, norm=None, log_levels=False,
-                                show_points=True, show_theory_curve=False):
+                                levels=None, show_points=True, show_theory_curve=False,
+                                legend_title=None, legend_loc="lower right",
+                                legend_ncol=1, show_legend=True, **_ignored):
     """
     Draw one panel from the pre-fitted summary files. Fits nothing.
 
-    The stage-3 summariser (src/sweeps_analysis/summarise.py) already did the Richards fit,
-    the bootstrap band and the theory inversion, so this function only renders columns.
-    That is the whole point of the split: the figure no longer depends on the theory
-    module, on crossing_fit, or on the per-replicate cloud being reloaded.
+    Stage 3 already did the scam fit, its confidence band and the theory inversion, so this
+    only renders columns. Each curve gets a discrete colour and a legend entry; the measured
+    crossing is a filled marker sitting on the curve at the target level, and the theoretical
+    crossing a dashed vertical line in the same colour.
 
     Args:
-        curves: rows of curves.csv (x, y_fit, y_lo, y_hi, y_theory, fit_kind).
-        crossings: rows of crossings.csv (crossing, theory_crossing_pred).
+        curves: rows of curves.csv (x, y_fit, y_lo, y_hi, y_theory).
+        crossings: rows of crossings.csv (crossing, crossing_y, theory_crossing_pred).
         points: rows of points.csv for the scatter, or None to omit it.
-        sweep: filter all three frames to this sweep name first, when they hold several.
+        sweep: filter all three frames to this sweep name first.
+        cbar_label: used as the legend title (kept under its old name so the figure scripts
+            need no edit).
         show_theory_curve: also draw the continuous theoretical curve, not just its crossing.
 
-    Returns the per-curve crossing rows as a list of dicts, matching crossing_panel's.
+    Returns the per-curve crossing rows as a list of dicts.
     """
     if sweep is not None:
         curves = curves[curves["sweep"] == sweep]
@@ -156,68 +184,73 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 
     if levels is None:
         levels = np.sort(curves["level"].unique())
-    if norm is None:
-        norm = (colors.LogNorm(vmin=levels.min(), vmax=levels.max()) if log_levels
-                else colors.Normalize(vmin=levels.min(), vmax=levels.max()))
-    cmap = cm.viridis if cmap is None else cmap
+    colors_ = level_colors(levels, cmap)
 
     out = []
-    for level in levels:
+    for level, color in zip(levels, colors_):
         c = curves[curves["level"] == level].sort_values("x")
         if c.empty:
             continue
-        color = cmap(norm(level))
 
         if show_points and points is not None:
             pt = points[points["level"] == level]
             ax.scatter(pt["x"], pt["cos2"], color=color, **POINT_KW)
 
         ax.fill_between(c["x"], c["y_lo"], c["y_hi"], color=color, **BAND_KW)
-        ax.plot(c["x"], c["y_fit"], "-", color=color, **FIT_KW)
+        ax.plot(c["x"], c["y_fit"], "-", color=color, label=format_level(level), **FIT_KW)
         if show_theory_curve and c["y_theory"].notna().any():
             ax.plot(c["x"], c["y_theory"], ":", color=color, linewidth=1.0, zorder=3)
 
         row = crossings[crossings["level"] == level]
         crossing = float(row["crossing"].iloc[0]) if len(row) else np.nan
         theory = float(row["theory_crossing_pred"].iloc[0]) if len(row) else np.nan
+        at_edge = bool(row["crossing_at_edge"].iloc[0]) if len(row) and             "crossing_at_edge" in row else False
         if np.isfinite(crossing):
-            ax.axvline(crossing, color=color, **EMP_VLINE_KW)
-            # Drawn only where the fit also reaches the target: a lone dashed line reads as
-            # a detection point the data never supports. The number is in the table either
-            # way. Same rule as crossing_panel.
+            # On the curve, at the target: the marker is the crossing, so it cannot drift
+            # away from the line the way a separate vertical rule could. A curve that only
+            # grazes the target as the sweep ends gets a hollow marker -- its crossing is a
+            # lower bound set by where the simulation stopped, not a measured detection
+            # point, and it would otherwise read as if it were one.
+            if at_edge:
+                ax.plot([crossing], [target],
+                        **{**CROSS_MARKER_KW, "markerfacecolor": "none",
+                           "markeredgecolor": color, "markeredgewidth": 1.4})
+            else:
+                ax.plot([crossing], [target], color=color, **CROSS_MARKER_KW)
+            # Theory drawn only where the fit also reaches the target: a lone dashed line
+            # reads as a detection point the data never supports. The number is in the
+            # table either way.
             if np.isfinite(theory):
                 ax.axvline(theory, color=color, **THEORY_VLINE_KW)
 
         out.append(dict(level=level, crossing=crossing,
                         crossing_lo=float(row["crossing_lo"].iloc[0]) if len(row) else np.nan,
                         crossing_hi=float(row["crossing_hi"].iloc[0]) if len(row) else np.nan,
-                        theory=theory))
+                        theory=theory, at_edge=at_edge))
 
     ax.axhline(target, color="0.6", linewidth=0.8, linestyle=":", zorder=0)
     ax.set_xscale("log")
     ax.set_ylim(-0.04, 1.04)
     ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
-
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(cbar_label)
-    cbar.outline.set_visible(False)
+    if show_legend:
+        ax.legend(title=legend_title if legend_title is not None else cbar_label,
+                  loc=legend_loc, fontsize=8, title_fontsize=9, frameon=False,
+                  handlelength=1.4, labelspacing=0.25, ncol=legend_ncol,
+                  columnspacing=1.2)
     return out
 
 
 def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                             cmap=None, cbar_label="", target=DEFAULT_TARGET,
-                            levels=None, norm=None, log_levels=False,
-                            show_points=True, mark_peak=True):
+                            levels=None, show_points=True, mark_peak=True,
+                            legend_title=None, legend_loc="lower left",
+                            show_legend=True, **_ignored):
     """
-    Draw a non-monotone sweep: the fitted curve and its peak, with no crossing lines.
+    Draw a non-monotone sweep: the concave scam fit and its peak, with no crossing markers.
 
-    For sweeps where the response turns over, a "first x reaching the target" is not a
-    well-defined summary and a sigmoid cannot represent the shape. The summariser fits a
-    local-linear curve instead and reports peak height and location; this panel draws that
-    curve and marks each peak with a dot. The target line is kept as a reference level, but
-    nothing is claimed to cross it.
+    Where the response turns over, "the first x reaching the target" is not a well-defined
+    summary; the peak is. The target line is kept as a reference level, but nothing is
+    claimed to cross it.
 
     Returns per-curve dicts with level / peak_x / peak_y and their CIs.
     """
@@ -229,31 +262,26 @@ def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 
     if levels is None:
         levels = np.sort(curves["level"].unique())
-    if norm is None:
-        norm = (colors.LogNorm(vmin=levels.min(), vmax=levels.max()) if log_levels
-                else colors.Normalize(vmin=levels.min(), vmax=levels.max()))
-    cmap = cm.viridis if cmap is None else cmap
+    colors_ = level_colors(levels, cmap)
 
     out = []
-    for level in levels:
+    for level, color in zip(levels, colors_):
         c = curves[curves["level"] == level].sort_values("x")
         if c.empty:
             continue
-        color = cmap(norm(level))
 
         if show_points and points is not None:
             pt = points[points["level"] == level]
             ax.scatter(pt["x"], pt["cos2"], color=color, **POINT_KW)
 
         ax.fill_between(c["x"], c["y_lo"], c["y_hi"], color=color, **BAND_KW)
-        ax.plot(c["x"], c["y_fit"], "-", color=color, **FIT_KW)
+        ax.plot(c["x"], c["y_fit"], "-", color=color, label=format_level(level), **FIT_KW)
 
         row = crossings[crossings["level"] == level]
         px = float(row["peak_x"].iloc[0]) if len(row) and "peak_x" in row else np.nan
         py = float(row["peak_y"].iloc[0]) if len(row) and "peak_y" in row else np.nan
         if mark_peak and np.isfinite(px) and np.isfinite(py):
-            ax.plot([px], [py], "o", color=color, markersize=5,
-                    markeredgecolor="white", markeredgewidth=0.7, zorder=5)
+            ax.plot([px], [py], color=color, **CROSS_MARKER_KW)
 
         out.append(dict(level=level, peak_x=px, peak_y=py,
                         peak_x_lo=float(row["peak_x_lo"].iloc[0]) if len(row) else np.nan,
@@ -265,23 +293,71 @@ def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     ax.set_xscale("log")
     ax.set_ylim(-0.04, 1.04)
     ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
-
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(cbar_label)
-    cbar.outline.set_visible(False)
+    if show_legend:
+        ax.legend(title=legend_title if legend_title is not None else cbar_label,
+                  loc=legend_loc, fontsize=8, title_fontsize=9, frameon=False,
+                  handlelength=1.4, labelspacing=0.25)
     return out
 
 
 def peak_legend(ax, target=DEFAULT_TARGET, loc="lower left"):
-    """Key for a non-monotone panel: fit, band, peak marker, reference level."""
-    ax.plot([], [], "-", color="0.35", linewidth=1.6, label="local-linear fit")
-    ax.fill_between([], [], [], color="0.35", alpha=0.30, linewidth=0, label="68% band")
-    ax.plot([], [], "o", color="0.35", markersize=5, markeredgecolor="white",
-            markeredgewidth=0.7, label="peak overlap")
-    ax.plot([], [], ":", color="0.6", linewidth=0.8, label=rf"$\langle\hat u,u\rangle^2={target:g}$")
-    ax.legend(loc=loc, fontsize=8, frameon=False)
+    """
+    Key for what the marks mean on a non-monotone panel.
+
+    Added as a *second* legend so it does not displace the per-curve one: matplotlib drops
+    an existing legend when a new one is set, so the first is re-added as an artist.
+    """
+    handles = [
+        Line2D([], [], color="0.35", linewidth=1.7, label="concave scam fit"),
+        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="95% band"),
+        Line2D([], [], color="0.35", label="peak overlap", **CROSS_MARKER_KW),
+        Line2D([], [], color="0.6", linewidth=0.8, linestyle=":",
+               label=rf"$\langle\hat u,u\rangle^2={target:g}$"),
+    ]
+    _add_second_legend(ax, handles, loc)
+
+
+# Where the curve legend sits, and where the encoding key goes so the two never collide.
+_OPPOSITE_LOC = {
+    "lower right": "upper left", "lower left": "upper right",
+    "upper right": "lower left", "upper left": "lower right",
+    "center right": "upper left", "center left": "upper right",
+}
+
+
+def _add_second_legend(ax, handles, loc):
+    """
+    Attach the encoding key without discarding or colliding with the per-curve legend.
+
+    matplotlib drops an existing legend when a new one is set, so the first is re-added as
+    an artist. The key is also moved to the opposite corner from the curve legend: both
+    default to the same side otherwise, and on the concave panels they landed on top of
+    each other.
+    """
+    existing = ax.get_legend()
+    if existing is not None:
+        # Place the key opposite whatever corner the curve legend claimed.
+        loc = _OPPOSITE_LOC.get(_legend_loc_name(existing), loc)
+    # A translucent background, unlike the per-curve legend: the key sits wherever the
+    # curve legend is not, which on a saturating panel can be right on top of the curves.
+    key = ax.legend(handles=handles, loc=loc, fontsize=8, frameon=True,
+                    handlelength=1.6, labelspacing=0.3, framealpha=0.85,
+                    facecolor="white", edgecolor="none")
+    key.set_zorder(10)
+    if existing is not None:
+        ax.add_artist(existing)
+        ax.add_artist(key)
+
+
+def _legend_loc_name(legend):
+    """The string location a legend was created with, or None if it cannot be recovered."""
+    codes = {1: "upper right", 2: "upper left", 3: "lower left", 4: "lower right",
+             5: "right", 6: "center left", 7: "center right", 8: "lower center",
+             9: "upper center", 10: "center"}
+    try:
+        return codes.get(int(legend._loc))
+    except Exception:
+        return None
 
 
 def peak_table(results, level_name, x_name):
@@ -298,25 +374,36 @@ def peak_table(results, level_name, x_name):
 
 
 def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left"):
-    """The shared key for what the three line styles mean, drawn in neutral grey."""
-    ax.plot([], [], "-", color="0.35", linewidth=1.6, label="fit to replicates")
-    ax.fill_between([], [], [], color="0.35", alpha=0.30, linewidth=0, label="68% band")
-    ax.plot([], [], "-", color="0.35", linewidth=1.0,
-            label=rf"measured $\langle\hat u,u\rangle^2={target:g}$")
-    ax.plot([], [], color="0.35", **{**THEORY_VLINE_KW, "zorder": 5}, label="theory")
-    ax.legend(loc=loc, fontsize=8, frameon=False)
+    """Key for what the marks mean on a crossing panel, beside the per-curve legend."""
+    handles = [
+        Line2D([], [], color="0.35", linewidth=1.7, label="monotone scam fit"),
+        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="95% band"),
+        Line2D([], [], color="0.35",
+               label=rf"measured $\langle\hat u,u\rangle^2={target:g}$",
+               **CROSS_MARKER_KW),
+        Line2D([], [], color="0.35", label="theory", **THEORY_VLINE_KW),
+    ]
+    _add_second_legend(ax, handles, loc)
 
 
 def crossing_table(results, level_name, x_name):
-    """Format the per-level crossings as text, for printing beside the figure."""
-    lines = [f"{level_name:>10}  {'measured':>12}  {'68% CI':>26}  {'theory':>12}  ratio"]
+    """
+    Format the per-level crossings as text, for printing beside the figure.
+
+    A row flagged at_edge is printed with ">" before the value and no ratio: the curve only
+    reached the target as the sweep ended, so the number is a lower bound on the crossing
+    rather than a measurement of it.
+    """
+    lines = [f"{level_name:>10}  {'measured':>13}  {'95% CI':>26}  {'theory':>12}  ratio"]
     for r in results:
         ci = (f"[{r['crossing_lo']:.3g}, {r['crossing_hi']:.3g}]"
               if np.isfinite(r["crossing_lo"]) else "-")
+        edge = r.get("at_edge", False)
+        meas = ("> " if edge else "") + f"{r['crossing']:.4g}"
         ratio = (r["crossing"] / r["theory"]
-                 if np.isfinite(r["crossing"]) and np.isfinite(r["theory"]) and r["theory"]
-                 else np.nan)
-        lines.append(f"{r['level']:>10.4g}  {r['crossing']:>12.4g}  {ci:>26}  "
+                 if np.isfinite(r["crossing"]) and np.isfinite(r["theory"])
+                 and r["theory"] and not edge else np.nan)
+        lines.append(f"{r['level']:>10.4g}  {meas:>13}  {ci:>26}  "
                      f"{r['theory']:>12.4g}  {ratio:.3f}")
     return f"{x_name} at target overlap\n" + "\n".join(lines)
 

@@ -5,17 +5,17 @@ PC1 recovery across the two-population split sweep, as a detection threshold in 
 A  PC1 squared overlap vs Fst at ten sample sizes N (phi = 0.5).
 B  PC1 squared overlap vs Fst at ten sampling fractions phi (N = 200).
 
-Each level is drawn as a curve fitted through every replicate (not through their medians),
-with a bootstrap band, and the comparison against theory is made at a single point rather
-than along the whole curve: a thin solid vertical line marks the Fst where the fit reaches
-squared overlap 0.9, and a dashed vertical line the Fst where the theory does.
+Each level is a monotone shape-constrained (scam) fit through every replicate, with its
+95% confidence band. The comparison against theory is made at a single point rather than
+along the whole curve: a filled marker sits on the curve where it reaches squared overlap
+0.9, and a dashed vertical line marks the Fst where the theory reaches it.
 
 The fit, the band and the theoretical crossing are all computed upstream by
 src/sweeps_analysis/summarise.py and read here as columns -- this script draws, it does not
 fit, and it holds no theory of its own. The theoretical crossing inverts the exact Ding &
 Yang overlap (src/threshold_and_overlap) for nu = 2 N phi (1-phi) Fst using each level's own
-measured L_eff and locus moments, so nothing in it is fitted: the gap between the solid and
-dashed line at each level is the whole result.
+measured L_eff and locus moments, so nothing in it is fitted: the horizontal gap between
+the marker and the dashed line at each level is the whole result.
 
 Reads results/sweep_summaries/single_split/{curves,crossings,points}.csv
     (sweeps split_vary_N and split_vary_phi)

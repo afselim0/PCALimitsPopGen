@@ -13,10 +13,12 @@ Panel A holds H at 0.20 rather than 0.05: at 0.05 the exact nu topped out at 1.6
 the whole simulated Fst range, so every curve plateaued near squared overlap 0.78 and never
 reached the 0.9 target -- the sweep had no crossing to report.
 
-The fit, the band and the theoretical crossing are computed upstream by
-src/sweeps_analysis/summarise.py and read here as columns; this script draws only. The
-theory uses the exact heteroskedastic route (eps is genuinely nonzero on this demography,
-tau/tau_bar spans 0.81-1.17), anchored on the exact nu recorded per cell.
+The fit (a monotone shape-constrained scam smooth), its 95% band and the theoretical
+crossing are computed upstream by src/sweeps_analysis/summarise.py and read here as
+columns; this script draws only. A filled marker sits on the curve at squared overlap 0.9
+and a dashed vertical line marks the theoretical crossing. The theory uses the exact
+heteroskedastic route (eps is genuinely nonzero on this demography, tau/tau_bar spans
+0.81-1.17), anchored on the exact nu recorded per cell.
 
 Reads results/sweep_summaries/african_split/{curves,crossings,points}.csv
     (sweeps african_split_vary_N and african_split_vary_harmonic_phi)
@@ -51,9 +53,12 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     res_N = crossing_panel_from_summary(
         axes[0], curves, crossings, points, sweep="african_split_vary_N",
         cmap=CMAP_N, cbar_label=r"$N$", target=target)
+    # Ten H levels: the legend needs the empty upper-left quadrant, not the right edge
+    # where the curves rise. Two columns keeps it short enough to clear them.
     res_H = crossing_panel_from_summary(
         axes[1], curves, crossings, points, sweep="african_split_vary_harmonic_phi",
-        cmap=CMAP_H, cbar_label=r"$H$", target=target)
+        cmap=CMAP_H, cbar_label=r"$H$", target=target,
+        legend_loc="upper left", legend_ncol=2)
 
     for ax in axes:
         ax.set_xlabel(r"$F_{ST}$")

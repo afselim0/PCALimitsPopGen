@@ -18,12 +18,12 @@ x is 1/M, applied in the analysis rather than here. The fit and the band come fr
 src/sweeps_analysis/summarise.py -- this script draws only.
 
 Unlike the other overlap figures, this one reports a PEAK rather than a detection crossing.
-cos^2 is not monotone in 1/M here: it rises to ~0.94 near 1/M ~ 0.3 and then decays, because
+cos^2 is not monotone in 1/M here: it rises to ~0.93 near 1/M ~ 0.3 and then decays, because
 at very weak migration the demes drift into independent clusters and a single (1,0)/(0,1)
-pair stops describing the structure. Forcing a sigmoid through that flattens the turnover
-into a plateau, so the summariser fits a local-linear curve instead and each curve is marked
-at its peak. The 0.9 line is kept as a reference level, not as something claimed to be
-crossed.
+pair stops describing the structure. The summariser therefore fits these sweeps with a
+*concave* shape constraint (scam's "cv") rather than the monotone one used elsewhere, which
+captures the turnover without prescribing where it falls, and marks each curve at its peak.
+The 0.9 line is kept as a reference level, not as something claimed to be crossed.
 
 Reads results/sweep_summaries/split_stepping_stone/{curves,crossings,points}.csv
     (sweeps split_ss_vary_N and split_ss_vary_phi)
@@ -55,18 +55,22 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    # Both panels' curves fill the upper band, so the per-curve legends go low; the
+    # encoding key is then placed in the opposite corner automatically.
     res_n = peak_panel_from_summary(
         axes[0], curves, crossings, points, sweep="split_ss_vary_N",
-        cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target)
+        cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target,
+        legend_loc="lower left")
     res_phi = peak_panel_from_summary(
         axes[1], curves, crossings, points, sweep="split_ss_vary_phi",
-        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
+        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target,
+        legend_loc="lower left")
 
     for ax in axes:
         ax.set_xlabel(r"$1/M$")
     axes[0].set_title(r"fixed $\phi=0.5$")
     axes[1].set_title(r"fixed $n_{B,\mathrm{per\,deme}}=4$")
-    peak_legend(axes[0], target=target, loc="lower left")
+    peak_legend(axes[0], target=target)
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,

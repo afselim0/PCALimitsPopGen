@@ -8,10 +8,11 @@ B  2D stepping stone, every deme sampled, curves are n-per-deme (degenerate lead
 x is 1/M rather than M: overlap grows as migration weakens, so the reciprocal makes the
 transition curve increasing. That reciprocal is applied in the analysis, not here.
 
-The fit, the band and the theoretical crossing are computed upstream by
-src/sweeps_analysis/summarise.py and read here as columns -- this script draws, it does not
-fit, and it holds no theory of its own. A thin solid vertical line marks the 1/M where the
-fit reaches squared overlap 0.9, a dashed line where theory does.
+The fit (a monotone shape-constrained scam smooth), its 95% band and the theoretical
+crossing are computed upstream by src/sweeps_analysis/summarise.py and read here as columns
+-- this script draws, it does not fit, and it holds no theory of its own. A filled marker
+sits on the curve where it reaches squared overlap 0.9, a dashed vertical line where theory
+reaches it.
 
 2D compares the degenerate (1,0)/(0,1) pair as a subspace (procrustes-aligned principal
 angles), since no canonical basis exists inside a degenerate eigenspace.

@@ -15,9 +15,14 @@ no fitting and holds no theory:
     points.csv     the replicate scatter, so a panel keeps its cloud without loading the
                    full replicate file
 
-The reported crossing is a monotone PAVA+PCHIP interpolation, NOT the drawn Richards curve
--- the Richards crossing is biased ~12% low against known closed-form answers. Both are
-written (crossing vs crossing_richards) so the difference stays visible.
+Curves are fitted with a shape-constrained spline (R's `scam` via rpy2), not a parametric
+sigmoid: the constraint is only the qualitative shape we can defend -- monotone increasing
+for the detection sweeps, concave for the recent-split ones that turn over -- and scam
+supplies a Bayesian confidence band directly, so the drawn curve and the reported crossing
+come from the same fit. See src/analysis/scam_fit.py.
+
+The 95% band is scam's own se.fit, not a bootstrap, so a curve costs one fit. The crossing
+CI is read off that band: where its upper and lower edges reach the target.
 """
 import argparse
 import os
@@ -29,7 +34,9 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "analysis"))  # src/analysis/
-from crossing_fit import DEFAULT_TARGET, fit_with_band, peak_with_band, theory_crossing
+from crossing_fit import DEFAULT_TARGET, theory_crossing
+from scam_fit import available as scam_available
+from scam_fit import crossing_with_ci, peak_with_ci, scam_fit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/sweeps_analysis/
 from cli_common import DEFAULT_N_BOOT, DEFAULT_N_GRID
@@ -87,17 +94,15 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         x = d["x"].to_numpy(float)
         y = d[VALUE_KEY].to_numpy(float)
 
-        # A sweep whose response is not monotone in the swept parameter gets a local-linear
-        # fit and a peak, not a sigmoid and a crossing. The recent-split spatial axis is
-        # the case in hand: cos^2 rises to ~0.94 near 1/M ~ 0.3 and then decays, because at
-        # very weak migration the demes drift into independent clusters and a single
-        # (1,0)/(0,1) pair stops describing the structure. That decay is a real feature of
-        # the demography, so the fit has to be able to show it.
-        if non_monotone:
-            fit = peak_with_band(x, y, n_boot=n_boot, seed=seed, n_grid=n_grid)
-        else:
-            fit = fit_with_band(x, y, target=target, n_boot=n_boot, seed=seed,
-                                n_grid=n_grid)
+        # The shape constraint is the only thing imposed on the curve. A sweep whose
+        # response turns over gets "cv" (concave) and is summarised by its peak; every
+        # other sweep is monotone increasing in the swept parameter and gets "mpi" and a
+        # crossing. The recent-split spatial axis is the turnover case: cos^2 rises to
+        # ~0.93 near 1/M ~ 0.3 and then decays, because at very weak migration the demes
+        # drift into independent clusters and a single (1,0)/(0,1) pair stops describing
+        # the structure.
+        shape = "cv" if non_monotone else "mpi"
+        fit = scam_fit(x, y, shape=shape, n_grid=n_grid)
         if fit is None:
             if verbose:
                 print(f"  {sweep} level={level}: no identifiable fit, skipped")
@@ -128,26 +133,34 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         if non_monotone:
             # No crossing is reported: the curve turns over, so "the x where it first
             # reaches 0.9" is not a well-defined summary of it. The peak is.
+            pk = peak_with_ci(fit)
             row = dict(
                 sweep=sweep, level=level, level_param=level_param, x_key=x_key,
-                target=target, non_monotone=True,
-                peak_y=fit["peak_y"], peak_y_lo=fit["peak_y_lo"],
-                peak_y_hi=fit["peak_y_hi"],
-                peak_x=fit["peak_x"], peak_x_lo=fit["peak_x_lo"],
-                peak_x_hi=fit["peak_x_hi"],
-                reaches_target=bool(fit["peak_y"] >= target),
+                target=target, non_monotone=True, shape=fit["shape"], edf=fit["edf"],
+                peak_y=pk["peak_y"], peak_y_lo=pk["peak_y_lo"], peak_y_hi=pk["peak_y_hi"],
+                peak_x=pk["peak_x"], peak_x_lo=pk["peak_x_lo"], peak_x_hi=pk["peak_x_hi"],
+                reaches_target=bool(pk["peak_y"] >= target),
                 theory_crossing_pred=x_star, theory_crossing_grid=x_grid_theory,
                 n_replicates=fit["n_points"], n_levels=fit["n_levels"])
         else:
+            # Crossing and CI both come off the drawn curve and its band, so the marker
+            # the figure puts on the line is exactly this number.
+            cx, cx_lo, cx_hi, at_edge = crossing_with_ci(fit, target)
+            # y at the crossing is the target by construction; carried so the panel can
+            # place its marker without re-deriving it.
             row = dict(
                 sweep=sweep, level=level, level_param=level_param, x_key=x_key,
-                target=target, non_monotone=False,
-                crossing=fit["crossing"], crossing_lo=fit["crossing_lo"],
-                crossing_hi=fit["crossing_hi"],
-                crossing_richards=fit["crossing_richards"],
+                target=target, non_monotone=False, shape=fit["shape"], edf=fit["edf"],
+                crossing=cx, crossing_lo=cx_lo, crossing_hi=cx_hi,
+                crossing_y=target, crossing_at_edge=at_edge,
                 theory_crossing_pred=x_star, theory_crossing_grid=x_grid_theory,
-                ratio_measured_over_theory=(fit["crossing"] / x_star
-                                            if np.isfinite(x_star) and x_star else np.nan),
+                # A crossing that only happens in the last sliver of the swept range says
+                # where the sweep stopped, not where detection happens, so it is not
+                # compared against theory.
+                ratio_measured_over_theory=(cx / x_star
+                                            if np.isfinite(x_star) and x_star
+                                            and np.isfinite(cx) and not at_edge
+                                            else np.nan),
                 n_replicates=fit["n_points"], n_levels=fit["n_levels"])
         for k in ("N", "L_eff", "gamma", "nu", "K", "M", "phi", "H", "n_per_deme"):
             if k in d.columns:
@@ -158,8 +171,7 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
             sweep=sweep, level=level, level_param=level_param, x_key=x_key,
             x=fit["x_grid"], y_fit=fit["y_fit"], y_lo=fit["y_lo"], y_hi=fit["y_hi"],
             y_theory=y_theory,
-            fit_kind=("local_linear" if non_monotone
-                      else ("richards" if fit["params"] is not None else "monotone")))))
+            fit_kind=f"scam_{fit['shape']}")))
 
         point_rows.append(pd.DataFrame(dict(
             sweep=sweep, level=level, level_param=level_param, x_key=x_key,

@@ -1,36 +1,38 @@
 #%%
 """
-Spatial-axis PC recovery vs M for the recent-split demography, two panels.
+Spatial-axis recovery vs migration for the recent-split demography: a panmictic population
+A plus a K x K grid B that split off t_split generations ago.
 
-A  n_per_deme_B varied at fixed phi=0.5 (B's share of N held at half).
-B  phi varied at fixed n_per_deme_B=4.
+A  n-per-deme-B varied at a fixed 50/50 split between the structured and panmictic halves.
+B  phi (B's share of the total sample) varied at n-per-deme-B = 4.
 
-Each level is a curve fitted through every replicate (not through their medians) with a
-bootstrap band. The comparison against theory is a pair of vertical lines rather than a
-prediction drawn at every x: a thin solid line at the 1/M where the fit reaches squared
-overlap 0.9, and a dashed line at the 1/M where the theory does.
+phi here is the *total sample fraction* drawn from the structured demes -- not the
+fraction-of-demes-sampled phi in SteppingStoneRandomOverlapVsM, which is a different sweep
+entirely. Every deme is always sampled here; phi only trades n_A against B's total.
 
-The x axis is 1/M rather than M: overlap grows as migration weakens, and the transition
-fit expects an increasing curve. nu_1 comes from the analysis (split_stepping_stone_theory
-via the phase-type coalescent calculation, not the equilibrium formula -- the split is too
-recent for equilibrium) and is rescaled as 1/M at fixed design.
+The target axis is the (1,0)/(0,1) spatial pair, located by overlap rather than by rank:
+it is not reliably the leading eigenvalue of the full A+B system once A carries a large
+share of the sample.
 
-Reads results/analysis/RecentSpatialOverlapVsM/overlap_replicates.csv, writes
-results/figures/RecentSpatialOverlapVsM.pdf
+x is 1/M, applied in the analysis rather than here. The fit, the band and the theoretical
+crossing all come from src/sweeps_analysis/summarise.py -- this script draws only.
+
+Reads results/sweep_summaries/split_stepping_stone/{curves,crossings,points}.csv
+    (sweeps split_ss_vary_N and split_ss_vary_phi)
+Writes results/figures/RecentSpatialOverlapVsM.pdf
 """
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from matplotlib import cm
 
-from crossing_panel import crossing_panel, crossing_table, encoding_legend
+from crossing_panel import crossing_panel_from_summary, crossing_table, encoding_legend
 from plotting_style import setup_plotting_style
-from SteppingStoneOverlapVsM import flat_overlap
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "RecentSpatialOverlapVsM")
+SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries",
+                           "split_stepping_stone")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
 CMAP = cm.viridis
@@ -38,41 +40,19 @@ CMAP_PHI = cm.plasma
 TARGET = 0.9
 
 
-def theory_for(df, level_key):
-    """
-    level -> (1/M -> predicted squared overlap), for the dashed vertical lines.
-
-    nu_1 is read from the analysis rather than recomputed: for this demography it comes
-    from a sparse phase-type coalescent calculation over the recent split, which the
-    plotting script has no business redoing. It scales as 1/M at fixed sampling design,
-    so it rescales from the cell it was recorded at.
-    """
-    def make(level):
-        d = df[df[level_key] == level]
-        if d.empty or "nu_1" not in d:
-            return None
-        gamma = float(d.gamma.median())
-        ref = d.iloc[0]
-        nu_ref, inv_M_ref = float(ref.nu_1), 1.0 / float(ref.M)
-        if not np.isfinite(nu_ref) or inv_M_ref <= 0:
-            return None
-        return lambda inv_M: flat_overlap(nu_ref * inv_M / inv_M_ref, gamma)
-    return make
-
-
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR, target=TARGET):
+def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     setup_plotting_style()
-    df = pd.read_csv(os.path.join(analysis_dir, "overlap_replicates.csv"))
-    df["inv_M"] = 1.0 / df["M"]
-    df_n = df[df.sweep == "vary_n"]
-    df_phi = df[df.sweep == "vary_phi"]
+    curves = pd.read_csv(os.path.join(summary_dir, "curves.csv"))
+    crossings = pd.read_csv(os.path.join(summary_dir, "crossings.csv"))
+    points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
-    res_n = crossing_panel(axes[0], df_n, "n_per_deme_B", "inv_M", CMAP,
-                           r"$n_{B,\mathrm{per\,deme}}$", target=target,
-                           theory_overlap=theory_for(df_n, "n_per_deme_B"))
-    res_phi = crossing_panel(axes[1], df_phi, "phi", "inv_M", CMAP_PHI, r"$\phi$",
-                             target=target, theory_overlap=theory_for(df_phi, "phi"))
+    res_n = crossing_panel_from_summary(
+        axes[0], curves, crossings, points, sweep="split_ss_vary_N",
+        cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target)
+    res_phi = crossing_panel_from_summary(
+        axes[1], curves, crossings, points, sweep="split_ss_vary_phi",
+        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
 
     for ax in axes:
         ax.set_xlabel(r"$1/M$")

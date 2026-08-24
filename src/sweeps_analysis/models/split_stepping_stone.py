@@ -51,6 +51,20 @@ def prepare(cfg, sim_row):
             "M": _M(sim_row)}
 
 
+def prepare_cached(cfg, cell_row):
+    """
+    The summariser's stand-in for prepare().
+
+    prepare() reads simulation columns (Ne_ancestral, m, t_split) that live in the
+    parameter table, not in a cell row, so calling it from the summariser raises. It is
+    not needed there: theory_overlap anchors on the nu_1 and M the runner already
+    recorded per cell, and M is the only piece of ctx it actually reads.
+    """
+    return {"K": int(cell_row["K"]), "m": float(cell_row["m"]),
+            "t_split": float(cell_row.get("t_split", float("nan"))),
+            "Ne_ancestral": float("nan"), "M": float(cell_row["M"])}
+
+
 def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
     """
     The theoretical (1,0)/(0,1) spatial pair, lifted to full [A, B_00, ...] sample space:

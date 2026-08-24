@@ -14,8 +14,16 @@ The target axis is the (1,0)/(0,1) spatial pair, located by overlap rather than 
 it is not reliably the leading eigenvalue of the full A+B system once A carries a large
 share of the sample.
 
-x is 1/M, applied in the analysis rather than here. The fit, the band and the theoretical
-crossing all come from src/sweeps_analysis/summarise.py -- this script draws only.
+x is 1/M, applied in the analysis rather than here. The fit and the band come from
+src/sweeps_analysis/summarise.py -- this script draws only.
+
+Unlike the other overlap figures, this one reports a PEAK rather than a detection crossing.
+cos^2 is not monotone in 1/M here: it rises to ~0.94 near 1/M ~ 0.3 and then decays, because
+at very weak migration the demes drift into independent clusters and a single (1,0)/(0,1)
+pair stops describing the structure. Forcing a sigmoid through that flattens the turnover
+into a plateau, so the summariser fits a local-linear curve instead and each curve is marked
+at its peak. The 0.9 line is kept as a reference level, not as something claimed to be
+crossed.
 
 Reads results/sweep_summaries/split_stepping_stone/{curves,crossings,points}.csv
     (sweeps split_ss_vary_N and split_ss_vary_phi)
@@ -27,7 +35,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import cm
 
-from crossing_panel import crossing_panel_from_summary, crossing_table, encoding_legend
+from crossing_panel import peak_legend, peak_panel_from_summary, peak_table
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,10 +55,10 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
-    res_n = crossing_panel_from_summary(
+    res_n = peak_panel_from_summary(
         axes[0], curves, crossings, points, sweep="split_ss_vary_N",
         cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target)
-    res_phi = crossing_panel_from_summary(
+    res_phi = peak_panel_from_summary(
         axes[1], curves, crossings, points, sweep="split_ss_vary_phi",
         cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
 
@@ -58,7 +66,7 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         ax.set_xlabel(r"$1/M$")
     axes[0].set_title(r"fixed $\phi=0.5$")
     axes[1].set_title(r"fixed $n_{B,\mathrm{per\,deme}}=4$")
-    encoding_legend(axes[0], target=target, loc="lower right")
+    peak_legend(axes[0], target=target, loc="lower left")
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
@@ -70,8 +78,8 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     fig.savefig(out, bbox_inches="tight")
     fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
     print(f"wrote {out}")
-    print(crossing_table(res_n, "n_B", "1/M"))
-    print(crossing_table(res_phi, "phi", "1/M"))
+    print(peak_table(res_n, "n_B", "1/M"))
+    print(peak_table(res_phi, "phi", "1/M"))
     return fig
 
 

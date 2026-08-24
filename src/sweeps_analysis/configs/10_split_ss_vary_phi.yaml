@@ -16,6 +16,13 @@ fixed:
   L: 10000
   L_polymorphic: false
 
+# cos^2 is NOT monotone in 1/M on this demography: it peaks near 1/M ~ 0.3 and then decays,
+# because at very weak migration the demes drift into independent clusters and the single
+# (1,0)/(0,1) spatial pair stops describing the structure. That turnover is a real feature
+# worth showing, so the summariser fits a local-linear curve and reports the peak (height
+# and location) instead of forcing a sigmoid and a 0.9 crossing.
+non_monotone: true
+
 sampling:
   fixed: {n_per_deme_B: 4}
   vary:

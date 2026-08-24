@@ -29,7 +29,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "analysis"))  # src/analysis/
-from crossing_fit import DEFAULT_TARGET, fit_with_band, theory_crossing
+from crossing_fit import DEFAULT_TARGET, fit_with_band, peak_with_band, theory_crossing
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/sweeps_analysis/
 from cli_common import DEFAULT_N_BOOT, DEFAULT_N_GRID
@@ -79,6 +79,7 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
     sweep = cfg["name"]
     level_param = cfg["sampling"]["vary"]["param"]
     x_key = get_model(cfg["model"]).X_KEY
+    non_monotone = bool(cfg.get("non_monotone", False))
 
     cross_rows, curve_rows, point_rows = [], [], []
     for level in np.sort(df["level"].unique()):
@@ -86,7 +87,17 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         x = d["x"].to_numpy(float)
         y = d[VALUE_KEY].to_numpy(float)
 
-        fit = fit_with_band(x, y, target=target, n_boot=n_boot, seed=seed, n_grid=n_grid)
+        # A sweep whose response is not monotone in the swept parameter gets a local-linear
+        # fit and a peak, not a sigmoid and a crossing. The recent-split spatial axis is
+        # the case in hand: cos^2 rises to ~0.94 near 1/M ~ 0.3 and then decays, because at
+        # very weak migration the demes drift into independent clusters and a single
+        # (1,0)/(0,1) pair stops describing the structure. That decay is a real feature of
+        # the demography, so the fit has to be able to show it.
+        if non_monotone:
+            fit = peak_with_band(x, y, n_boot=n_boot, seed=seed, n_grid=n_grid)
+        else:
+            fit = fit_with_band(x, y, target=target, n_boot=n_boot, seed=seed,
+                                n_grid=n_grid)
         if fit is None:
             if verbose:
                 print(f"  {sweep} level={level}: no identifiable fit, skipped")
@@ -114,14 +125,30 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         y_theory = (np.array([fn(xx) for xx in fit["x_grid"]]) if fn is not None
                     else np.full(len(fit["x_grid"]), np.nan))
 
-        row = dict(
-            sweep=sweep, level=level, level_param=level_param, x_key=x_key, target=target,
-            crossing=fit["crossing"], crossing_lo=fit["crossing_lo"],
-            crossing_hi=fit["crossing_hi"], crossing_richards=fit["crossing_richards"],
-            theory_crossing_pred=x_star, theory_crossing_grid=x_grid_theory,
-            ratio_measured_over_theory=(fit["crossing"] / x_star
-                                        if np.isfinite(x_star) and x_star else np.nan),
-            n_replicates=fit["n_points"], n_levels=fit["n_levels"])
+        if non_monotone:
+            # No crossing is reported: the curve turns over, so "the x where it first
+            # reaches 0.9" is not a well-defined summary of it. The peak is.
+            row = dict(
+                sweep=sweep, level=level, level_param=level_param, x_key=x_key,
+                target=target, non_monotone=True,
+                peak_y=fit["peak_y"], peak_y_lo=fit["peak_y_lo"],
+                peak_y_hi=fit["peak_y_hi"],
+                peak_x=fit["peak_x"], peak_x_lo=fit["peak_x_lo"],
+                peak_x_hi=fit["peak_x_hi"],
+                reaches_target=bool(fit["peak_y"] >= target),
+                theory_crossing_pred=x_star, theory_crossing_grid=x_grid_theory,
+                n_replicates=fit["n_points"], n_levels=fit["n_levels"])
+        else:
+            row = dict(
+                sweep=sweep, level=level, level_param=level_param, x_key=x_key,
+                target=target, non_monotone=False,
+                crossing=fit["crossing"], crossing_lo=fit["crossing_lo"],
+                crossing_hi=fit["crossing_hi"],
+                crossing_richards=fit["crossing_richards"],
+                theory_crossing_pred=x_star, theory_crossing_grid=x_grid_theory,
+                ratio_measured_over_theory=(fit["crossing"] / x_star
+                                            if np.isfinite(x_star) and x_star else np.nan),
+                n_replicates=fit["n_points"], n_levels=fit["n_levels"])
         for k in ("N", "L_eff", "gamma", "nu", "K", "M", "phi", "H", "n_per_deme"):
             if k in d.columns:
                 row[k] = float(d[k].median())
@@ -131,7 +158,8 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
             sweep=sweep, level=level, level_param=level_param, x_key=x_key,
             x=fit["x_grid"], y_fit=fit["y_fit"], y_lo=fit["y_lo"], y_hi=fit["y_hi"],
             y_theory=y_theory,
-            fit_kind="richards" if fit["params"] is not None else "monotone")))
+            fit_kind=("local_linear" if non_monotone
+                      else ("richards" if fit["params"] is not None else "monotone")))))
 
         point_rows.append(pd.DataFrame(dict(
             sweep=sweep, level=level, level_param=level_param, x_key=x_key,

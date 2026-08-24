@@ -206,6 +206,97 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     return out
 
 
+def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
+                            cmap=None, cbar_label="", target=DEFAULT_TARGET,
+                            levels=None, norm=None, log_levels=False,
+                            show_points=True, mark_peak=True):
+    """
+    Draw a non-monotone sweep: the fitted curve and its peak, with no crossing lines.
+
+    For sweeps where the response turns over, a "first x reaching the target" is not a
+    well-defined summary and a sigmoid cannot represent the shape. The summariser fits a
+    local-linear curve instead and reports peak height and location; this panel draws that
+    curve and marks each peak with a dot. The target line is kept as a reference level, but
+    nothing is claimed to cross it.
+
+    Returns per-curve dicts with level / peak_x / peak_y and their CIs.
+    """
+    if sweep is not None:
+        curves = curves[curves["sweep"] == sweep]
+        crossings = crossings[crossings["sweep"] == sweep]
+        if points is not None:
+            points = points[points["sweep"] == sweep]
+
+    if levels is None:
+        levels = np.sort(curves["level"].unique())
+    if norm is None:
+        norm = (colors.LogNorm(vmin=levels.min(), vmax=levels.max()) if log_levels
+                else colors.Normalize(vmin=levels.min(), vmax=levels.max()))
+    cmap = cm.viridis if cmap is None else cmap
+
+    out = []
+    for level in levels:
+        c = curves[curves["level"] == level].sort_values("x")
+        if c.empty:
+            continue
+        color = cmap(norm(level))
+
+        if show_points and points is not None:
+            pt = points[points["level"] == level]
+            ax.scatter(pt["x"], pt["cos2"], color=color, **POINT_KW)
+
+        ax.fill_between(c["x"], c["y_lo"], c["y_hi"], color=color, **BAND_KW)
+        ax.plot(c["x"], c["y_fit"], "-", color=color, **FIT_KW)
+
+        row = crossings[crossings["level"] == level]
+        px = float(row["peak_x"].iloc[0]) if len(row) and "peak_x" in row else np.nan
+        py = float(row["peak_y"].iloc[0]) if len(row) and "peak_y" in row else np.nan
+        if mark_peak and np.isfinite(px) and np.isfinite(py):
+            ax.plot([px], [py], "o", color=color, markersize=5,
+                    markeredgecolor="white", markeredgewidth=0.7, zorder=5)
+
+        out.append(dict(level=level, peak_x=px, peak_y=py,
+                        peak_x_lo=float(row["peak_x_lo"].iloc[0]) if len(row) else np.nan,
+                        peak_x_hi=float(row["peak_x_hi"].iloc[0]) if len(row) else np.nan,
+                        peak_y_lo=float(row["peak_y_lo"].iloc[0]) if len(row) else np.nan,
+                        peak_y_hi=float(row["peak_y_hi"].iloc[0]) if len(row) else np.nan))
+
+    ax.axhline(target, color="0.6", linewidth=0.8, linestyle=":", zorder=0)
+    ax.set_xscale("log")
+    ax.set_ylim(-0.04, 1.04)
+    ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
+
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
+    cbar.set_label(cbar_label)
+    cbar.outline.set_visible(False)
+    return out
+
+
+def peak_legend(ax, target=DEFAULT_TARGET, loc="lower left"):
+    """Key for a non-monotone panel: fit, band, peak marker, reference level."""
+    ax.plot([], [], "-", color="0.35", linewidth=1.6, label="local-linear fit")
+    ax.fill_between([], [], [], color="0.35", alpha=0.30, linewidth=0, label="68% band")
+    ax.plot([], [], "o", color="0.35", markersize=5, markeredgecolor="white",
+            markeredgewidth=0.7, label="peak overlap")
+    ax.plot([], [], ":", color="0.6", linewidth=0.8, label=rf"$\langle\hat u,u\rangle^2={target:g}$")
+    ax.legend(loc=loc, fontsize=8, frameon=False)
+
+
+def peak_table(results, level_name, x_name):
+    """Format the per-level peaks as text, the counterpart of crossing_table."""
+    lines = [f"{level_name:>10}  {'peak overlap':>14}  {'68% CI':>20}  {x_name+' at peak':>16}  {'68% CI':>20}"]
+    for r in results:
+        cy = (f"[{r['peak_y_lo']:.3f}, {r['peak_y_hi']:.3f}]"
+              if np.isfinite(r.get("peak_y_lo", np.nan)) else "-")
+        cx = (f"[{r['peak_x_lo']:.3g}, {r['peak_x_hi']:.3g}]"
+              if np.isfinite(r.get("peak_x_lo", np.nan)) else "-")
+        lines.append(f"{r['level']:>10.4g}  {r['peak_y']:>14.3f}  {cy:>20}  "
+                     f"{r['peak_x']:>16.4g}  {cx:>20}")
+    return "peak of the fitted curve\n" + "\n".join(lines)
+
+
 def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left"):
     """The shared key for what the three line styles mean, drawn in neutral grey."""
     ax.plot([], [], "-", color="0.35", linewidth=1.6, label="fit to replicates")

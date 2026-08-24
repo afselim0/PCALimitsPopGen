@@ -12,7 +12,7 @@ builds the grid around it, which is what keeps every simulation informative.
     structure_eigenvalues   nu_k = N / (M K mu_k), the spatial structure eigenvalues
     critical_M              largest M at which PC1 is still detectable (Psi criterion)
     critical_M_approx       the closed form, for reference
-    migration_grid          num_m rates log-spaced around m_c = M_c / (4 Ne)
+    inverse_M_grid          num values log-spaced in 1/M, and the m they imply at a given Ne
     Ne_for_target_m         Ne placing m_c at a target rate, keeping m physical
 
 Ne is a free dial. Only M = 4 Ne mbar enters the theory, so raising Ne is how a large-K
@@ -26,7 +26,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
-from utils import detection_psi
+from threshold_and_overlap import spectrum_psi
 
 
 def laplacian_eigenvalues(K, dimension=1):
@@ -161,10 +161,10 @@ def is_pc1_detectable(K, M, n_per_deme, L, dimension=1):
     N ~ K_demes here rather than N >> K_demes, so the floor is not an overwhelming
     majority and the spatial criterion applies instead of g(). In 2D the leading
     eigenvalue is doubly degenerate (mu_10 = mu_01) and is judged as the subspace it
-    spans, per the structure-eigenvalue convention in detection_psi.
+    spans, per the structure-eigenvalue convention in spectrum_psi.
     """
     spectrum = full_spectrum(K, M, n_per_deme, dimension)
-    return detection_psi(0, spectrum, L, degenerate_subspace=True) < 1.0
+    return spectrum_psi(0, spectrum, L, degenerate_subspace=True) < 1.0
 
 
 def critical_M(K, n_per_deme, L, dimension=1, lo=1e-2, hi=1e9, iterations=200):
@@ -299,58 +299,61 @@ def Ne_for_target_m(M_c, target_m):
     return int(round(M_c / (4.0 * target_m)))
 
 
-def migration_grid(m_c, num_m, span=8.0):
+def inverse_M_grid(inv_M_min, inv_M_max, num_inv_M, Ne, spacing="log"):
     """
-    num_m migration rates geometrically spaced over [m_c/span, m_c*span].
+    num_inv_M values of 1/M over [inv_M_min, inv_M_max], and the migration rates they
+    imply.
 
-    Centring on m_c is the point: it guarantees the transition is bracketed with equal
-    resolution on both sides, whatever K and L do to the threshold. Geometric spacing is
-    what makes "both sides" true -- the grid is symmetric in log m about m_c, so half the
-    simulations land on each side of the transition.
+    1/M is the natural sweep axis: the structure eigenvalues are nu_k = N / (M K mu_k),
+    linear in 1/M. The default "log" grid is uniform in log(1/M), hence uniform in
+    log(nu), giving equal resolution on each decade of structure strength; "linear"
+    spaces 1/M itself evenly instead. M = 4 Ne mbar, so the migration rate each grid point
+    asks for is m = 1 / (4 Ne * (1/M)) -- the user picks the range in the scaled units the
+    theory is written in, and Ne turns it back into something msprime can simulate.
 
-    The earlier sweeps used a mirrored geomspace, min + max - geomspace(min, max), to
-    bunch points towards high m. That reflection is linear while the spacing is
-    logarithmic, so it does not preserve the log grid: for span = 8 it puts 97% of the
-    rates above m_c and leaves the detectable side with almost no points. Plain
-    geomspace instead.
+    Returned ascending in 1/M, which is descending in m and ascending in structure: the
+    well-mixed, undetectable end first.
 
-    This rejection is specific to centring symmetrically around a known m_c -- it is not
-    a blanket objection to mirrored spacing. When the sweep instead uses an explicit
-    [min, max] range and the transition is expected near one end (e.g. m_max), denser
-    coverage there is exactly the point; see sweep.axis_values(..., spacing=
-    "log_dense_high"), used by the stepping-stone kind configs for that case.
+    Returns:
+        (inv_M, m): both length num_inv_M, inv_M ascending.
     """
-    if num_m < 1:
-        raise ValueError(f"num_m must be at least 1, got {num_m}")
-    if not np.isfinite(m_c) or m_c <= 0:
-        raise ValueError(f"m_c must be finite and positive, got {m_c}")
-    if span <= 1:
-        raise ValueError(f"span must exceed 1, got {span}")
-    if num_m == 1:
-        return np.array([m_c])
-    return np.geomspace(m_c / span, m_c * span, num_m)
+    if num_inv_M < 1:
+        raise ValueError(f"num_inv_M must be at least 1, got {num_inv_M}")
+    if not 0 < inv_M_min <= inv_M_max:
+        raise ValueError(
+            f"need 0 < inv_M_min <= inv_M_max, got {inv_M_min} and {inv_M_max}")
+    if Ne <= 0:
+        raise ValueError(f"Ne must be positive, got {Ne}")
+    if num_inv_M == 1:
+        inv_M = np.array([inv_M_min])
+    elif spacing == "log":
+        inv_M = np.geomspace(inv_M_min, inv_M_max, num_inv_M)
+    elif spacing == "linear":
+        inv_M = np.linspace(inv_M_min, inv_M_max, num_inv_M)
+    else:
+        raise ValueError(f"spacing must be 'log' or 'linear', got {spacing!r}")
+    return inv_M, 1.0 / (4.0 * Ne * inv_M)
 
 
-def sweep_plan(K_values, n_per_deme, L, dimension=1, num_m=60, span=8.0,
-               Ne=None, target_m=None):
+def sweep_plan(K_values, n_per_deme, L, dimension=1, Ne=None, target_m=None):
     """
-    One row per (K, m) cell: the migration grid for each K, centred on that K's own M_c.
+    Reference detection thresholds for each K: the critical M, its closed form, and the
+    migration rate m_c = M_c / (4 Ne) that M_c corresponds to at that deme size.
 
     Exactly one of Ne or target_m must be given. A fixed Ne keeps the demography constant
     and lets m_c move with K; target_m instead solves for Ne per K so that m_c lands on a
     chosen rate, which is what keeps m physical when M_c grows like K^(3/2).
 
-    L here is the raw SNP count, so the M_c used to centre the grid is an overestimate:
-    the aspect ratio that governs the bulk is N / L_eff, and the variance-effective count
-    runs well under half of L (~470 of 1000 in the existing 2D runs). Since M_c ~ sqrt(L)
-    that is roughly a factor 1.5, comfortably inside the default span of 8, so the grid
-    still brackets the true threshold -- but it is why the grid is centred generously
-    rather than tightly, and why the analysis recomputes M_c from the measured L_eff
-    instead of reusing the M_c recorded here.
+    These are recorded alongside each simulation and used by the analysis and plotting
+    scripts to place the transition; they no longer choose the sweep grid, which comes
+    from the explicit 1/M range in the config (inverse_M_grid). L here is the raw SNP
+    count, so M_c is an overestimate -- the aspect ratio governing the bulk is N / L_eff,
+    and the variance-effective count runs well under half of L. Since M_c ~ sqrt(L) that
+    is roughly a factor 1.5, which is why the analysis recomputes M_c from the measured
+    L_eff rather than reusing the value recorded here.
 
     Returns:
-        list of dicts, one per K, with keys K, K_demes, N, Ne, M_c, M_c_approx, m_c,
-        and the m_values array.
+        list of dicts, one per K, with keys K, K_demes, N, Ne, M_c, M_c_approx, m_c.
     """
     if (Ne is None) == (target_m is None):
         raise ValueError("give exactly one of Ne or target_m")
@@ -360,9 +363,8 @@ def sweep_plan(K_values, n_per_deme, L, dimension=1, num_m=60, span=8.0,
         K_demes = num_demes(K, dimension)
         M_c = critical_M(K, n_per_deme, L, dimension)
         Ne_K = Ne if Ne is not None else Ne_for_target_m(M_c, target_m)
-        m_c = M_c / (4.0 * Ne_K)
         plan.append(dict(
             K=K, K_demes=K_demes, N=n_per_deme * K_demes, Ne=Ne_K,
             M_c=M_c, M_c_approx=critical_M_approx(K, n_per_deme, L, dimension),
-            m_c=m_c, m_values=migration_grid(m_c, num_m, span=span)))
+            m_c=M_c / (4.0 * Ne_K)))
     return plan

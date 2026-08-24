@@ -26,9 +26,9 @@ which is worth stating that way rather than as a bare ratio:
     under-sampling one sister costs detectability in proportion to *that* fraction however
     many samples the other sister contributes. That is the design consequence.
 
-results/simulations/african_split realizes exactly this structure: YRI2 is
-built from YRI by copying its migration rates, so T_{YRI,c} = T_{YRI2,c} for c in
-{CEU, CHB} and tau_YRI = tau_YRI2 by symmetry.
+results/simulations/african_split realizes exactly this structure: YRI1 and YRI2 are
+both built from the same ancestral YRI by copying its migration rates, so T_{YRI1,c} =
+T_{YRI2,c} for c in {CEU, CHB} and tau_YRI1 = tau_YRI2 by symmetry.
 
 How the four variables are tested without a 4-D grid. The prediction is a *product*,
 nu = N * H * Fst, so it factorizes into claims that can be tested separately:
@@ -54,7 +54,7 @@ the predicted u_1. That is the ansatz under test, so the overlap is reported alo
 cell only supports the hypothesis if the eigenvector matches *and* carries the predicted
 eigenvalue.
 
-Sample order in the simulations is alphabetical: CEU, CHB, YRI, YRI2, so the sister pair is
+Sample order in the simulations is alphabetical: CEU, CHB, YRI1, YRI2, so the sister pair is
 blocks 2 and 3.
 
 nu_exact is also computed per cell (exact_sister_nu.exact_sister_nu, from the full 4x4
@@ -79,15 +79,15 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from pc_recovery import load_simulations, subsample, effective_L, SIMULATION_ROOT
-from exact_sister_nu import cached_coal_times, exact_sister_nu
+from exact_sister_nu import cached_coal_times, exact_sister_nu, analytical_nu
 from sweeps import ANALYSIS_ROOT
 from utils import compute_sample_covariance
 
 DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "african_split")
 DEFAULT_NAME = "SisterEigenvalue"
 
-POPS = ["CEU", "CHB", "YRI", "YRI2"]
-SISTER = (2, 3)                  # YRI, YRI2 in alphabetical block order
+POPS = ["CEU", "CHB", "YRI1", "YRI2"]
+SISTER = (2, 3)                  # YRI1, YRI2 in alphabetical block order
 SPECTRUM_SCALE = 0.5             # compute_sample_covariance places the floor at 2
 N_PER_POP_FULL = 5000            # per-population sample count in african_split config
 
@@ -132,12 +132,27 @@ def sister_axis(n):
     return np.repeat(w / np.sqrt(n), n)
 
 
+SISTER_RANK = 2   # 0-indexed: CEU/CHB/YRI(combined) always outrank the recent YRI1/YRI2
+                   # split, so the sister axis sits at PC3. Measured on every one of 175
+                   # cells in an earlier run of this script (rank == 2, zero exceptions) --
+                   # see results/analysis/SisterEigenvalue/cells.csv.
+
+
 def measure(Z, n, L, rng, K=len(POPS)):
     """
     The sister eigenvalue and its eigenvector's overlap with the prediction.
 
-    Returns the eigenvalue of whichever eigenvector has the largest |overlap| with u_1,
-    that overlap, its rank in the descending spectrum, and the realized SNP counts.
+    Selects by fixed rank (SISTER_RANK, i.e. PC3), not by searching the spectrum for the
+    best-overlapping eigenvector: the deep OOA splits (CEU/CHB/YRI) always carry the three
+    largest structure eigenvalues here, so the sister axis is deterministically next in
+    line -- measured on every one of 175 cells in an earlier run of this script, rank == 2
+    with zero exceptions. An argmax search (over the full spectrum, or even just a couple
+    of neighbouring ranks) is unnecessary here and biases the no-signal floor upward: a
+    max-of-several-candidates search finds a larger baseline overlap by chance than a
+    single fixed-rank read does.
+
+    Returns the eigenvalue at SISTER_RANK, its overlap with u_1, that rank, and the
+    realized SNP counts.
 
     The floor is *measured*, not assumed. The theoretical spectrum is
     lambda_k = (1+nu_k)/(1+alpha), so the bulk sits at 1/(1+alpha) rather than at 1 and
@@ -157,17 +172,17 @@ def measure(Z, n, L, rng, K=len(POPS)):
     vals, vecs = vals[order], vecs[:, order]
 
     floor = float(vals[K - 1:-1].mean())
-    overlaps = np.abs(vecs.T @ sister_axis(n))
-    k = int(np.argmax(overlaps))
+    k = SISTER_RANK
+    overlap = float(np.abs(vecs[:, k] @ sister_axis(n)))
     return dict(nu_meas=float(vals[k] / floor - 1.0),
                 nu_meas_unnormed=float(vals[k] - 1.0),
                 floor=floor, alpha_meas=float(1.0 / floor - 1.0),
-                overlap=float(overlaps[k]), rank=k,
+                overlap=overlap, rank=k,
                 L_eff=effective_L(sub), L_raw=sub.shape[1])
 
 
 def _design(n_other, n1, n2):
-    """Sample-size vector [CEU, CHB, YRI, YRI2] from the sister sizes and the others'."""
+    """Sample-size vector [CEU, CHB, YRI1, YRI2] from the sister sizes and the others'."""
     n = [n_other, n_other, 0, 0]
     n[SISTER[0]], n[SISTER[1]] = n1, n2
     return np.array(n, dtype=int)
@@ -243,6 +258,7 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, L=DEFAULT_L,
             Fst = float(params.Fst.iloc[i])
             t_split = float(params.t_split.iloc[i])
             nu_pred = predicted_nu(Fst, n)
+            nu_analytical = analytical_nu(Tmap[t_split], n, Fst)
             nu_exact = exact_sister_nu(Tmap[t_split], n, sister_axis(n))["nu_exact"]
             for rep in range(num_replicates):
                 rng = np.random.default_rng([seed, int(i), rep, len(label)])
@@ -252,19 +268,20 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, L=DEFAULT_L,
                     Fst=Fst, design=label, family=family, rep=rep,
                     N=int(n.sum()), n_sister1=int(n[SISTER[0]]), n_sister2=int(n[SISTER[1]]),
                     n_other=int(n[0]), H=harmonic_phi(n), nu_pred=nu_pred,
-                    nu_exact=nu_exact, **m))
+                    nu_analytical=nu_analytical, nu_exact=nu_exact, **m))
                 bar.update(1)
     bar.close()
 
     df = pd.DataFrame(rows)
     df["ratio"] = df.nu_meas / df.nu_pred
     df["ratio_unnormed"] = df.nu_meas_unnormed / df.nu_pred
+    df["ratio_analytical"] = df.nu_meas / df.nu_analytical
     df["ratio_exact"] = df.nu_meas / df.nu_exact
     df["nu_c"] = np.sqrt(df.N / df.L_eff)
     df["above_threshold"] = df.nu_pred > df.nu_c
 
     summary = df.groupby(["design", "family", "simID", "Fst", "N", "H",
-                          "nu_pred", "nu_exact"]).agg(
+                          "nu_pred", "nu_analytical", "nu_exact"]).agg(
         nu_meas=("nu_meas", "median"), nu_meas_sd=("nu_meas", "std"),
         nu_meas_unnormed=("nu_meas_unnormed", "median"),
         ratio=("ratio", "median"), ratio_unnormed=("ratio_unnormed", "median"),

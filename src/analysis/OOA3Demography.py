@@ -2,16 +2,17 @@
 """
 Demography preview and the YRI1/YRI2 sister-split PC, at three split depths.
 
-Three t_split values -- very recent, intermediate, deep -- spanning the swept range in
-results/simulations/african_split. For each:
+Three t_split values, all shallow (15, 50, 100 generations ago) -- the recent end of the
+swept range in results/simulations/african_split, where the sister split is fine enough to
+be worth showing at this resolution. For each:
 
     demography   the msprime Demography as a demes.Graph, for demesdraw
-    pc_phi05     sample PC1 (by overlap with the predicted sister axis) at N=10000,
-                 phi_1 = phi_2 = 0.05 (500 YRI + 500 YRI2, remainder split CEU/CHB)
-    pc_phi20     the same at phi_1 = phi_2 = 0.20 (2000 + 2000)
+    pc_phi05     sample PC1 (by overlap with the predicted sister axis) at N=2000,
+                 phi_1 = phi_2 = 0.05 (100 YRI1 + 100 YRI2, remainder split CEU/CHB)
+    pc_phi20     the same at phi_1 = phi_2 = 0.20 (400 + 400)
 
 The PC is located by overlap with the predicted sister axis (see SisterEigenvalue.sister_axis)
-rather than by rank: the deep OOA splits carry larger eigenvalues than the recent YRI/YRI2
+rather than by rank: the deep OOA splits carry larger eigenvalues than the recent YRI1/YRI2
 split, so the sister axis is not PC1 of the sample covariance.
 
 Outputs (results/analysis/OOA3Demography):
@@ -45,17 +46,16 @@ from demographies.african_split import demography as ooa3_demography
 DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "african_split")
 DEFAULT_NAME = "OOA3Demography"
 
-N_TOTAL = 10000
+N_TOTAL = 2000
 PHI_VALUES = (0.05, 0.20)
 
-# very recent / intermediate / deep, chosen as the closest available simIDs to these
-# t_split targets rather than hardcoded indices, since which rows finished simulating can
-# vary run to run.
-T_SPLIT_TARGETS = {"recent": 15.0, "intermediate": 100.0, "deep": 400.0}
+# Three shallow t_split values, chosen as the closest available simIDs to these targets
+# rather than hardcoded indices, since which rows finished simulating can vary run to run.
+T_SPLIT_TARGETS = {"t15": 15.0, "t50": 50.0, "t100": 100.0}
 
 
 def design(phi, n_total=N_TOTAL):
-    """n = [n_CEU, n_CHB, n_YRI, n_YRI2], sisters at phi each, remainder split CEU/CHB."""
+    """n = [n_CEU, n_CHB, n_YRI1, n_YRI2], sisters at phi each, remainder split CEU/CHB."""
     n_s = int(round(phi * n_total))
     n_o = (n_total - 2 * n_s) // 2
     n = np.array([n_o, n_o, n_s, n_s], dtype=int)

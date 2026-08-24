@@ -4,15 +4,18 @@ stays panmictic for its whole post-split history, population B immediately fragm
 into a K x K grid of demes (nearest-neighbour migration, reflecting boundaries, no
 wraparound -- identical construction to stepping_stone_2d).
 
-K, Ne_ancestral, t_split and L are fixed parameters; only the migration rate between B's
-demes is swept.
+K, Ne_ancestral, t_split and L are fixed parameters. The swept parameter is 1/M for
+migration between B's demes, log-spaced over [sweep.inv_M_min, sweep.inv_M_max] in
+sweep.num_inv_M steps. M = 4 Ne_deme m with Ne_deme = Ne_ancestral / K^2, so the deme
+size implied by Ne_ancestral is what converts the scaled range into migration rates --
+see stepping_stone_grid.inverse_M_grid.
 
 Ne_B (B's size at the moment of the split, before fragmenting) is fixed to Ne_ancestral
 -- simple census-size conservation, not solved for a target effective size. Each of B's
 K^2 demes then gets initial_size = Ne_ancestral / K**2.
 
-Output directory: K<K>, with its own simulation_parameters.csv and m<value>.npy -- same
-convention as stepping_stone_2d.
+Output directory: K<K>, with its own simulation_parameters.csv and invM<value>.npy --
+same convention as stepping_stone_2d.
 """
 import os
 import sys
@@ -26,14 +29,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 from utils import simulate_haplotypes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/simulations/
-from sweep import axis_values, check_no_collisions, run_table, run_one_row
-from stepping_stone_grid import sweep_plan
+from sweep import check_no_collisions, run_table, run_one_row
+from stepping_stone_grid import inverse_M_grid, sweep_plan
 
 DIMENSION = 2
 
 
-def format_m(m):
-    return f"m{m:.4e}"
+def format_inv_M(inv_M):
+    return f"invM{inv_M:.4e}"
 
 
 def cell_name(K):
@@ -83,29 +86,25 @@ def build_parameter_table(cfg):
     n_per_pop_A, n_per_deme_B = fixed["n_per_pop_A"], fixed["n_per_deme_B"]
     random_seed = cfg["random_seed"]
 
-    # sweep_plan's Ne is the individual deme's size (M = 4*Ne*m), which is
-    # Ne_ancestral / K**2 here, not Ne_ancestral itself.
+    # M = 4 * Ne_deme * m here: the individual deme's size, Ne_ancestral / K**2, not
+    # Ne_ancestral itself. That is also the Ne sweep_plan needs.
     #
     # The plain stepping-stone m_c formula assumes migration-drift equilibrium; a
     # population that only recently fragmented (t_split) hasn't equilibrated, so m_c/M_c
-    # here are recorded for reference only, not used to centre the grid. sweep.m_min/m_max
-    # give the actual migration range explicitly instead.
+    # are recorded for reference only.
     Ne_deme = Ne_ancestral / (K * K)
-    cell = sweep_plan([K], n_per_deme_B, L, dimension=DIMENSION,
-                      num_m=sweep.get("num_m", 40), span=sweep.get("span", 3.0),
-                      Ne=Ne_deme, target_m=None)[0]
-    explicit_range = "m_min" in sweep and "m_max" in sweep
-    m_values = (axis_values(sweep["m_min"], sweep["m_max"], sweep.get("num_m", 40),
-                            sweep.get("spacing", "log"))
-               if explicit_range else cell["m_values"])
-    simIDs = [format_m(m) for m in m_values]
-    check_no_collisions(simIDs, "m values")
+    inv_M, m_values = inverse_M_grid(sweep["inv_M_min"], sweep["inv_M_max"],
+                                     sweep["num_inv_M"], Ne_deme,
+                                     sweep.get("spacing", "log"))
+    cell = sweep_plan([K], n_per_deme_B, L, dimension=DIMENSION, Ne=Ne_deme)[0]
+    simIDs = [format_inv_M(v) for v in inv_M]
+    check_no_collisions(simIDs, "1/M values")
 
     return pd.DataFrame({
         "simID": simIDs,
         "outdir_suffix": cell_name(K),
         "K": K, "K_demes": cell["K_demes"], "m": m_values,
-        "M": 4 * Ne_deme * m_values,
+        "M": 4 * Ne_deme * m_values, "inv_M": inv_M,
         "M_c": cell["M_c"], "M_c_approx": cell["M_c_approx"], "m_c": cell["m_c"],
         "Ne_ancestral": Ne_ancestral, "Ne_deme": Ne_deme, "t_split": t_split,
         "n_per_pop_A": n_per_pop_A, "n_per_deme_B": n_per_deme_B,

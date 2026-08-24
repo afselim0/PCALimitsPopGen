@@ -9,9 +9,16 @@ fixed:
   Ne: 4000
 sweep:
   type: stepping_stone
-  num_m: 100
-  min: 0.002
-  max: 0.2
-  spacing: log_dense_high   # finer resolution near m_max, where m_c is expected to sit
+  # Swept parameter is 1/M (M = 4*Ne*m), log-spaced
+  num_inv_M: 100
+  inv_M_min: 0.0005
+  inv_M_max: 0.05
 cluster:
-  job_name: SS_1D          # mem/time/cpus_per_task auto-probed by run_simulation.py --submit
+  job_name: SS_1D
+  # From the previous 100-task run (job 53752342, all COMPLETED): worst case 52m34s and
+  # 1.05G MaxRSS at 8 cpus. Pinned rather than re-probed. The new grid reaches lower m
+  # than that run did, so the structured phase before pooling is longer -- hence 2h, and
+  # 2G since 1G left no headroom over the observed peak.
+  mem: 2G
+  time: "02:00:00"
+  cpus_per_task: 8

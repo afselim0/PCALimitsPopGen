@@ -20,6 +20,7 @@ which is why that term is added analytically rather than measured -- the probe o
 measures the *other* memory a real run would use (baseline interpreter/msprime/demography
 overhead), which a probe at any L is a reasonable proxy for.
 """
+import math
 import os
 import resource
 import sys
@@ -149,8 +150,14 @@ def estimate(cfg, probe_dir, n_workers=DEFAULT_CPUS, verbose=True):
     else:
         array_gb = _bytes_to_gb(N_max * L)
 
+    # probe_rss_gb is one worker's baseline (interpreter + demography/msprime state), not
+    # the whole run's: simulate_haplotypes spawns n_workers independent processes, each
+    # building that same state (ProcessPoolExecutor, one msprime.sim_ancestry call per
+    # worker), so the baseline scales with worker count too -- it is not shared. For a
+    # simple few-population demography this term is small regardless, but for something
+    # like split_stepping_stone's 82-population debugger it dominates the array term.
     def total_mem_gb(workers):
-        return (probe_rss_gb + array_gb * (1.0 + 1.0 / workers)) * MEM_HEADROOM
+        return (probe_rss_gb * workers + array_gb * (1.0 + 1.0 / workers)) * MEM_HEADROOM
 
     workers = n_workers
     while workers > 1 and total_mem_gb(workers) > MEM_CEILING_GB:
@@ -172,7 +179,10 @@ def estimate(cfg, probe_dir, n_workers=DEFAULT_CPUS, verbose=True):
 
 
 def format_mem(gb):
-    return f"{max(1, int(round(gb)))}G"
+    # ceil, not round: MEM_HEADROOM is meant as a safety margin over the estimate, and
+    # round() can throw most of a sub-1GB margin away (1.19 -> "1G", same as the estimate
+    # having no headroom at all).
+    return f"{max(1, math.ceil(gb))}G"
 
 
 def format_time(seconds):

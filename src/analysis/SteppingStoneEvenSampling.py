@@ -3,8 +3,11 @@
 Even sampling of every deme, 1D and 2D stepping-stone: eigenvalue verification and PC
 recovery vs M/M_c, over a sweep of per-deme sample sizes n.
 
-Every deme is sampled at n_per_deme in [2, 4, 8, 16, 32, 64], L held fixed across n (the
-simulation's full L, since every simulated m already shares one L). For each (m, n) cell:
+Every deme is sampled at n_per_deme in [2, 4, 8, 16, 32, 64], L held genuinely fixed
+across n: 10000 in 1D (DEFAULT_L_BY_DIMENSION), drawn from each subsample's polymorphic
+columns so every cell is exactly that wide, which needs 10000 to sit under the ~11.3k
+polymorphic at the smallest n. 2D defaults to the simulation's own L (every column kept);
+--L overrides either, and any explicit L takes the exact-width path. For each (m, n) cell:
 
     nu_meas       the sample eigenvalue(s) of the leading structure mode(s) -- one value
                   in 1D, the mean of the degenerate pair in 2D
@@ -23,10 +26,17 @@ convention elsewhere in this project).
 Outputs (results/analysis/SteppingStoneEvenSampling):
     even_1D.csv   one row per (m, n) cell
     even_2D.csv   one row per (m, n) cell
+    even_1D_replicates.csv, even_2D_replicates.csv
+                  one row per (m, n, replicate), which is what the overlap-vs-M figure
+                  fits its transition curve through
+    even_1D_crossings.csv, even_2D_crossings.csv
+                  one row per n: the 1/M at which measured and predicted overlap each
+                  cross the target
 """
 import argparse
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -35,6 +45,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from pc_recovery import (load_simulations, pc_recovery, subsample, effective_L,
                          _median_se, SIMULATION_ROOT)
+from crossing_fit import crossings_table, replicate_rows
 from sweeps import ANALYSIS_ROOT
 from utils import compute_sample_covariance
 
@@ -47,6 +58,12 @@ SPECTRUM_SCALE = 0.5   # compute_sample_covariance's floor sits at 2; the theory
 
 DEFAULT_NAME = "SteppingStoneEvenSampling"
 DEFAULT_N_VALUES = [2, 4, 8, 16, 32, 64]
+# SNPs subsampled per cell, by dimension. L must be held fixed across n so gamma = N/L_eff
+# is the only thing moving, which means it has to fit inside the smallest n's polymorphic
+# count. In 1D (K=25, L=20000) n=2 leaves ~11.3k polymorphic SNPs, so 10000 clears it with
+# margin. An explicit L is drawn from the polymorphic columns (subsample's L_polymorphic),
+# making it the exact width; None means "the simulation's own L", still the 2D default.
+DEFAULT_L_BY_DIMENSION = {1: 10000, 2: None}
 DEFAULT_NUM_REPLICATES = 20
 DEFAULT_SEED = 0
 
@@ -56,7 +73,7 @@ def n_leading(dimension):
     return 1 if dimension == 1 else 2
 
 
-def measure_eigenvalue(Z, n, L, V_lead, k_lead, rng):
+def measure_eigenvalue(Z, n, L, V_lead, k_lead, rng, L_exact=False):
     """
     Sample eigenvalue(s) of the leading structure mode(s), by overlap with V_lead.
 
@@ -70,7 +87,7 @@ def measure_eigenvalue(Z, n, L, V_lead, k_lead, rng):
     Returns nu_meas = lambda_meas / floor_meas - 1, the same convention structure_
     eigenvalues() uses for the theoretical nu (floor at nu = 0).
     """
-    sub = subsample(Z, n, L, rng)
+    sub = subsample(Z, n, L, rng, L_polymorphic=L_exact)
     G = compute_sample_covariance(sub) * SPECTRUM_SCALE
     vals, vecs = np.linalg.eigh(G)
     order = np.argsort(vals)[::-1]
@@ -85,55 +102,102 @@ def measure_eigenvalue(Z, n, L, V_lead, k_lead, rng):
     return lam_meas / floor - 1.0, float(effective_L(sub)), sub.shape[1]
 
 
-def analyse(simdir, dimension, n_values=DEFAULT_N_VALUES, L=None,
-           num_replicates=DEFAULT_NUM_REPLICATES, seed=DEFAULT_SEED, verbose=True):
-    """One row per (m, n) cell for a single K simulation directory."""
-    params, arrays = load_simulations(simdir)
-    K = int(params["K"].iloc[0])
+def _analyse_cell(path, simID, M, m, Ne, L_row, K, dimension, n_per, L, num_replicates, seed):
+    """
+    One (m, n) cell, as a standalone function so ProcessPoolExecutor can run it: reopens
+    the .npy by path (a memory-mapped array cannot cross a process boundary) rather than
+    receiving the array itself.
+    """
+    Z = np.load(path, mmap_mode="r")
     K_demes = num_demes(K, dimension)
-    n_available = int(params["n_per_deme"].iloc[0])
     k_lead = n_leading(dimension)
+    n = np.full(K_demes, n_per, dtype=int)
+    N = int(n.sum())
+    # An explicit L means a fixed width across the n sweep, so draw it from the
+    # polymorphic columns; falling back to the simulation's own L keeps every column.
+    L_cell = L if L is not None else int(L_row)
+    L_exact = L is not None
 
-    rows = []
-    cells = [(r, n) for r in params.itertuples() for n in n_values if n <= n_available]
-    bar = tqdm(cells, disable=not verbose, desc=os.path.basename(simdir))
-    for r, n_per in bar:
-        Z = arrays[r.Index]
-        n = np.full(K_demes, n_per, dtype=int)
-        N = int(n.sum())
-        L_cell = L if L is not None else int(r.L)
+    modes, nu_theory, V_theory = closed_form_spectrum(K, M, n_per, dimension)
+    V_lead, nu_lead = V_theory[:, :k_lead], nu_theory[:k_lead]
 
-        modes, nu_theory, V_theory = closed_form_spectrum(K, r.M, n_per, dimension)
-        V_lead, nu_lead = V_theory[:, :k_lead], nu_theory[:k_lead]
+    res = pc_recovery(Z, n, V_lead, indices=list(range(k_lead)), L=L_cell,
+                      num_replicates=num_replicates, seed=seed, nu=nu_lead,
+                      L_polymorphic=L_exact)
 
-        res = pc_recovery(Z, n, V_lead, indices=list(range(k_lead)), L=L_cell,
-                          num_replicates=num_replicates, seed=seed, nu=nu_lead)
+    nu_meass, L_effs = [], []
+    for rep in range(num_replicates):
+        rng = np.random.default_rng([seed, rep, 1])
+        nu_m, L_eff, _ = measure_eigenvalue(Z, n, L_cell, V_lead, k_lead, rng,
+                                            L_exact=L_exact)
+        nu_meass.append(nu_m)
+        L_effs.append(L_eff)
 
-        nu_meass, L_effs = [], []
-        for rep in range(num_replicates):
-            rng = np.random.default_rng([seed, rep, 1])
-            nu_m, L_eff, _ = measure_eigenvalue(Z, n, L_cell, V_lead, k_lead, rng)
-            nu_meass.append(nu_m)
-            L_effs.append(L_eff)
+    M_c = critical_M(K, n_per, res["L_eff"], dimension)
+    row = dict(
+        simID=simID, dimension=dimension, K=K, K_demes=K_demes,
+        m=m, Ne=Ne, M=M, n_per_deme=n_per, N=N,
+        L=L_cell, L_eff=res["L_eff"], L_raw=res["L_raw"], gamma=res["gamma"],
+        nu_theory=float(np.mean(nu_lead)),
+        nu_meas=float(np.median(nu_meass)), nu_meas_se=_median_se(nu_meass),
+        M_c=M_c, M_over_Mc=M / M_c if np.isfinite(M_c) and M_c > 0 else np.nan,
+        median_cos=res["median_cos"], se_cos=res["se_cos"],
+        analytical_cos=res["analytical_cos"], procrustes_d=res["procrustes_d"],
+        num_replicates=num_replicates)
+    # One row per replicate for the curve fit; M is the swept axis here, so it is the
+    # column the fit regresses against.
+    base = {k: v for k, v in row.items() if k != "M"}
+    reps = replicate_rows(base, M, "M", res["cos_replicates"], seed=seed)
+    return row, reps
 
-        M_c = critical_M(K, n_per, res["L_eff"], dimension)
-        rows.append(dict(
-            simID=r.simID, dimension=dimension, K=K, K_demes=K_demes,
-            m=r.m, Ne=r.Ne, M=r.M, n_per_deme=n_per, N=N,
-            L=L_cell, L_eff=res["L_eff"], L_raw=res["L_raw"], gamma=res["gamma"],
-            nu_theory=float(np.mean(nu_lead)),
-            nu_meas=float(np.median(nu_meass)), nu_meas_se=_median_se(nu_meass),
-            M_c=M_c, M_over_Mc=r.M / M_c if np.isfinite(M_c) and M_c > 0 else np.nan,
-            median_cos=res["median_cos"], se_cos=res["se_cos"],
-            analytical_cos=res["analytical_cos"], procrustes_d=res["procrustes_d"],
-            num_replicates=num_replicates))
-    return pd.DataFrame(rows)
+
+def analyse(simdir, dimension, n_values=DEFAULT_N_VALUES, L=None,
+           num_replicates=DEFAULT_NUM_REPLICATES, seed=DEFAULT_SEED, verbose=True,
+           n_workers=1):
+    """
+    One row per (m, n) cell for a single K simulation directory.
+
+    Cells are independent (each reopens its own .npy by path), so n_workers > 1 splits
+    them across processes with a ProcessPoolExecutor -- the large-n cells dominate runtime
+    (an eigendecomposition per replicate, cost ~ N^3), so this is the difference between a
+    sweep finishing in hours instead of days.
+    """
+    params, _ = load_simulations(simdir)
+    K = int(params["K"].iloc[0])
+    n_available = int(params["n_per_deme"].iloc[0])
+
+    cells = [(r, n_per) for r in params.itertuples() for n_per in n_values
+             if n_per <= n_available]
+    args = [(r.path, r.simID, r.M, r.m, r.Ne, r.L, K, dimension, n_per, L,
+            num_replicates, seed) for r, n_per in cells]
+
+    rows, rep_rows = [], []
+    desc = os.path.basename(simdir)
+    if n_workers <= 1:
+        for a in tqdm(args, disable=not verbose, desc=desc):
+            row, reps = _analyse_cell(*a)
+            rows.append(row)
+            rep_rows.extend(reps)
+    else:
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_analyse_cell, *a) for a in args]
+            # as_completed, not submission order: cells finish out of order (a slow n=64
+            # cell submitted early would otherwise block the bar behind fast ones that
+            # already finished), so this is what makes the progress rate honest.
+            for f in tqdm(as_completed(futures), total=len(futures), disable=not verbose,
+                         desc=desc):
+                row, reps = f.result()
+                rows.append(row)
+                rep_rows.extend(reps)
+    return pd.DataFrame(rows), pd.DataFrame(rep_rows)
 
 
 def run(dimension, simulation_root=None, n_values=DEFAULT_N_VALUES, L=None,
         num_replicates=DEFAULT_NUM_REPLICATES, seed=DEFAULT_SEED, name=DEFAULT_NAME,
-        verbose=True):
+        verbose=True, n_workers=1):
     """Even-sampling analysis for one dimension's single K simulation set."""
+    if L is None:
+        L = DEFAULT_L_BY_DIMENSION.get(dimension)
     simulation_root = simulation_root or os.path.join(
         SIMULATION_ROOT, f"stepping_stone_{dimension}d")
     cells = sorted(d for d in os.listdir(simulation_root)
@@ -145,17 +209,33 @@ def run(dimension, simulation_root=None, n_values=DEFAULT_N_VALUES, L=None,
         print(f"warning: {len(cells)} K cells found in {simulation_root}, "
               f"using all of them")
 
-    frames = [analyse(os.path.join(simulation_root, c), dimension, n_values=n_values,
-                      L=L, num_replicates=num_replicates, seed=seed, verbose=verbose)
-             for c in cells]
-    df = pd.concat(frames, ignore_index=True)
+    results = [analyse(os.path.join(simulation_root, c), dimension, n_values=n_values,
+                       L=L, num_replicates=num_replicates, seed=seed, verbose=verbose,
+                       n_workers=n_workers)
+              for c in cells]
+    df = pd.concat([r[0] for r in results], ignore_index=True)
+    df_rep = pd.concat([r[1] for r in results], ignore_index=True)
 
     outdir = os.path.join(ANALYSIS_ROOT, name)
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, f"even_{dimension}D.csv")
     df.to_csv(path, index=False)
+    rep_path = os.path.join(outdir, f"even_{dimension}D_replicates.csv")
+    df_rep.to_csv(rep_path, index=False)
+
+    # Crossings are computed against 1/M, not M: overlap grows as migration weakens, and
+    # the transition fit needs an increasing curve.
+    df_rep = df_rep.assign(inv_M=1.0 / df_rep["M"])
+    df_cross = crossings_table(df_rep, ["n_per_deme"], "inv_M", extra_keys=(
+        "dimension", "K", "K_demes", "N", "L", "L_eff", "gamma", "nu_theory",
+        "num_replicates"))
+    cross_path = os.path.join(outdir, f"even_{dimension}D_crossings.csv")
+    df_cross.to_csv(cross_path, index=False)
+
     if verbose:
         print(f"wrote {len(df)} rows -> {path}")
+        print(f"wrote {len(df_rep)} replicate rows -> {rep_path}")
+        print(f"wrote {len(df_cross)} crossing rows -> {cross_path}")
     return df
 
 
@@ -169,9 +249,11 @@ def main():
     p.add_argument("--num-replicates", type=int, default=DEFAULT_NUM_REPLICATES)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--name", default=DEFAULT_NAME)
+    p.add_argument("--n-workers", type=int, default=1)
     args = p.parse_args()
     run(args.dimension, simulation_root=args.simulation_root, n_values=args.n_values,
-        L=args.L, num_replicates=args.num_replicates, seed=args.seed, name=args.name)
+        L=args.L, num_replicates=args.num_replicates, seed=args.seed, name=args.name,
+        n_workers=args.n_workers)
 
 
 if __name__ == "__main__":

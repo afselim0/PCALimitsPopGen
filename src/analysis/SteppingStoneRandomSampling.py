@@ -33,12 +33,14 @@ Outputs (results/analysis/SteppingStoneRandomSampling):
 import argparse
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
+from crossing_fit import crossings_table, replicate_rows
 from pc_recovery import (load_simulations, subsample, sample_eigenvectors,
                          principal_cosines, procrustes_distance, effective_L,
                          analytical_cosine, SIMULATION_ROOT)
@@ -123,36 +125,72 @@ def measure_cell(Z, K, dimension, n_per_deme, phi, L, num_replicates, seed, M):
                analytical_cos=analytical_mean,
                procrustes_d=float(np.median(dists)),
                L_eff=L_eff_med, L_raw=float(np.median(L_raws)), gamma=gamma,
-               N=N_eff, n_demes_sampled=len(demes), nu_1=float(nu[0]))
+               N=N_eff, n_demes_sampled=len(demes), nu_1=float(nu[0]),
+               cos_replicates=mean_cos)
+
+
+def _sweep_cell(path, simID, M, m, Ne, L_row, K, dimension, sweep_name, design, L,
+                num_replicates, seed):
+    """
+    One (m, level) cell, as a standalone function so ProcessPoolExecutor can run it:
+    reopens the .npy by path (a memory-mapped array cannot cross a process boundary)
+    rather than receiving the array itself.
+    """
+    Z = np.load(path, mmap_mode="r")
+    L_cell = L if L is not None else int(L_row)
+    res = measure_cell(Z, K, dimension, design["n_per_deme"], design["phi"], L_cell,
+                       num_replicates, seed, M)
+    cos_reps = res.pop("cos_replicates")
+    row = dict(
+        simID=simID, dimension=dimension, K=K, sweep=sweep_name,
+        m=m, Ne=Ne, M=M, L=L_cell,
+        phi=design["phi"], n_per_deme=design["n_per_deme"], **res,
+        num_replicates=num_replicates)
+    # M is the swept axis for these figures, so it is the column the fit regresses against.
+    base = {k: v for k, v in row.items() if k != "M"}
+    return row, replicate_rows(base, M, "M", cos_reps, seed=seed)
 
 
 def analyse_sweep(simdir, dimension, sweep_name, levels, level_key,
-                  fixed, L, num_replicates, seed, verbose=True):
-    """One sweep (vary_phi or vary_n): every simulated m, at every level of the swept
-    sampling parameter, the other parameter held at `fixed`."""
-    params, arrays = load_simulations(simdir)
+                  fixed, L, num_replicates, seed, verbose=True, n_workers=1):
+    """
+    One sweep (vary_phi or vary_n): every simulated m, at every level of the swept
+    sampling parameter, the other parameter held at `fixed`.
+
+    Cells are independent (each reopens its own .npy by path), so n_workers > 1 splits
+    them across processes with a ProcessPoolExecutor.
+    """
+    params, _ = load_simulations(simdir)
     K = int(params["K"].iloc[0])
 
-    rows = []
     cells = [(r, lvl) for r in params.itertuples() for lvl in levels]
-    bar = tqdm(cells, disable=not verbose, desc=f"{sweep_name} ({dimension}D)")
-    for r, lvl in bar:
+    args = []
+    for r, lvl in cells:
         design = dict(fixed)
         design[level_key] = lvl
-        L_cell = L if L is not None else int(r.L)
+        args.append((r.path, r.simID, r.M, r.m, r.Ne, r.L, K, dimension, sweep_name,
+                    design, L, num_replicates, seed))
 
-        res = measure_cell(arrays[r.Index], K, dimension, design["n_per_deme"],
-                           design["phi"], L_cell, num_replicates, seed, r.M)
-        rows.append(dict(
-            simID=r.simID, dimension=dimension, K=K, sweep=sweep_name,
-            m=r.m, Ne=r.Ne, M=r.M, L=L_cell,
-            phi=design["phi"], n_per_deme=design["n_per_deme"], **res,
-            num_replicates=num_replicates))
-    return pd.DataFrame(rows)
+    rows, rep_rows = [], []
+    desc = f"{sweep_name} ({dimension}D)"
+    if n_workers <= 1:
+        for a in tqdm(args, disable=not verbose, desc=desc):
+            row, reps = _sweep_cell(*a)
+            rows.append(row)
+            rep_rows.extend(reps)
+    else:
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_sweep_cell, *a) for a in args]
+            for f in tqdm(as_completed(futures), total=len(futures), disable=not verbose,
+                         desc=desc):
+                row, reps = f.result()
+                rows.append(row)
+                rep_rows.extend(reps)
+    return pd.DataFrame(rows), pd.DataFrame(rep_rows)
 
 
 def run(dimension, simulation_root=None, L=None, num_replicates=DEFAULT_NUM_REPLICATES,
-        seed=DEFAULT_SEED, name=DEFAULT_NAME, verbose=True):
+        seed=DEFAULT_SEED, name=DEFAULT_NAME, verbose=True, n_workers=1):
     """Both sweeps for one dimension's single K simulation set."""
     simulation_root = simulation_root or os.path.join(
         SIMULATION_ROOT, f"stepping_stone_{dimension}d")
@@ -165,20 +203,40 @@ def run(dimension, simulation_root=None, L=None, num_replicates=DEFAULT_NUM_REPL
     if len(cells) > 1 and verbose:
         print(f"warning: {len(cells)} K cells found in {simulation_root}, using {cells[0]}")
 
-    df_phi = analyse_sweep(simdir, dimension, "vary_phi", PHI_VALUES, "phi",
-                           dict(n_per_deme=N_FIXED_FOR_PHI), L, num_replicates, seed,
-                           verbose=verbose)
-    df_n = analyse_sweep(simdir, dimension, "vary_n", N_VALUES, "n_per_deme",
-                        dict(phi=PHI_FIXED_FOR_N), L, num_replicates, seed,
-                        verbose=verbose)
+    df_phi, rep_phi = analyse_sweep(simdir, dimension, "vary_phi", PHI_VALUES, "phi",
+                                    dict(n_per_deme=N_FIXED_FOR_PHI), L, num_replicates,
+                                    seed, verbose=verbose, n_workers=n_workers)
+    df_n, rep_n = analyse_sweep(simdir, dimension, "vary_n", N_VALUES, "n_per_deme",
+                                dict(phi=PHI_FIXED_FOR_N), L, num_replicates, seed,
+                                verbose=verbose, n_workers=n_workers)
     df = pd.concat([df_phi, df_n], ignore_index=True)
+    df_rep = pd.concat([rep_phi, rep_n], ignore_index=True)
 
     outdir = os.path.join(ANALYSIS_ROOT, name)
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, f"random_{dimension}D.csv")
     df.to_csv(path, index=False)
+    rep_path = os.path.join(outdir, f"random_{dimension}D_replicates.csv")
+    df_rep.to_csv(rep_path, index=False)
+
+    # A curve is one level of one sweep, so both columns identify it; 1/M is the axis, so
+    # the fitted curve is increasing.
+    df_rep = df_rep.assign(inv_M=1.0 / df_rep["M"])
+    df_cross = pd.concat([
+        crossings_table(df_rep[df_rep.sweep == "vary_n"], ["sweep", "n_per_deme"], "inv_M",
+                        extra_keys=("dimension", "K", "phi", "N", "L", "L_eff", "gamma",
+                                    "nu_1", "n_demes_sampled", "num_replicates")),
+        crossings_table(df_rep[df_rep.sweep == "vary_phi"], ["sweep", "phi"], "inv_M",
+                        extra_keys=("dimension", "K", "n_per_deme", "N", "L", "L_eff",
+                                    "gamma", "nu_1", "n_demes_sampled", "num_replicates")),
+    ], ignore_index=True)
+    cross_path = os.path.join(outdir, f"random_{dimension}D_crossings.csv")
+    df_cross.to_csv(cross_path, index=False)
+
     if verbose:
         print(f"wrote {len(df)} rows -> {path}")
+        print(f"wrote {len(df_rep)} replicate rows -> {rep_path}")
+        print(f"wrote {len(df_cross)} crossing rows -> {cross_path}")
     return df
 
 
@@ -191,9 +249,11 @@ def main():
     p.add_argument("--num-replicates", type=int, default=DEFAULT_NUM_REPLICATES)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--name", default=DEFAULT_NAME)
+    p.add_argument("--n-workers", type=int, default=1)
     args = p.parse_args()
     run(args.dimension, simulation_root=args.simulation_root, L=args.L,
-        num_replicates=args.num_replicates, seed=args.seed, name=args.name)
+        num_replicates=args.num_replicates, seed=args.seed, name=args.name,
+        n_workers=args.n_workers)
 
 
 if __name__ == "__main__":

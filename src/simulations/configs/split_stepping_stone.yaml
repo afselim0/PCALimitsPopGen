@@ -5,15 +5,24 @@ n_workers: 8
 fixed:
   K: 9                      # 9x9 grid, Ne_per_deme = 10000/81 ~= 123.5
   Ne_ancestral: 10000     # = Ne_deme * K^2 = 123.5 * 81
-  t_split: 50
-  n_per_pop_A: 10000       # n_B = n_per_deme_B * K^2 = 124*81 = 10044, matches A
-  n_per_deme_B: 124
+  t_split: 500
+  n_per_pop_A: 5000       # n_B = n_per_deme_B * K^2 = 124*81 = 10044, matches A
+  n_per_deme_B: 64
   L: 20000
 sweep:
   type: stepping_stone
-  num_m: 100
-  m_min: 0.001
-  m_max: 0.1
-  spacing: log_dense_high
+  num_inv_M: 100
+  inv_M_min: 0.0405     # M = 24.69, m = 5e-2 (fastest migration)
+  inv_M_max: 4.05       # M = 0.247, m = 5e-4 (slowest migration)
 cluster:
-  job_name: split_SS      # mem/time/cpus_per_task auto-probed by run_simulation.py --submit
+  job_name: split_SS
+  mem: 8G           # was auto-probed at 1G and OOM'd on 90/100 tasks: resource_estimate.py
+                     # undercounted per-worker overhead for this 82-population demography
+                     # (fixed, but kept explicit here); 8G is the corrected ~4G estimate
+                     # with extra margin.
+  time: "06:00:00"   # from login-node timing of sim_ancestry at the sweep edges (N=10184,
+                     # t_split=500): 0.12 s/locus at m=5e-4, and a bimodal 0.41 s median /
+                     # 2.19 s mean at m=5e-2. At 2500 loci per cpu the fast-migration end
+                     # is ~1.5 h on the mean, which is what the heavy tail makes the right
+                     # predictor; 6 h leaves margin for the tail and the mutation step.
+  cpus_per_task: 8

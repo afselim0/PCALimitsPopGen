@@ -12,7 +12,7 @@ Two candidate mechanisms for the +0.31 (near nu_c) -> 0 (nu/nu_c > 2) bias:
 
 Discriminating design: hold N fixed, vary only Fst (so nu_1/nu_c sweeps) while
 nu_other (CEU/CHB-driven) and hence spike_gap stay ~fixed, since those are set by the
-deep OOA splits and don't depend on the recent YRI/YRI2 t_split. vary_phi.csv already has
+deep OOA splits and don't depend on the recent YRI1/YRI2 t_split. vary_phi.csv already has
 this structure *within* each `design` (fixed N=1000, fixed H, fixed n_other=400, Fst
 swept over all 100 t_split values) -- see SisterPCAlignment.py. vary_N.csv sweeps N at
 fixed Fst, giving the complementary bias-vs-N-at-fixed-nu_1/nu_c panel.
@@ -39,7 +39,7 @@ from sweeps import ANALYSIS_ROOT
 from utils import compute_F_hat
 
 DEFAULT_NAME = "SpikeInteraction"
-SISTER_POP = 3  # YRI2, index into the K=4 [CEU, CHB, YRI, YRI2] population vector
+SISTER_POP = 3  # YRI2, index into the K=4 [CEU, CHB, YRI1, YRI2] population vector
 CACHE = os.path.join(ANALYSIS_ROOT, "SisterEigenvalue", "coal_times.npz")
 
 
@@ -74,7 +74,7 @@ def spike_spectrum(T, n):
 
     # sister axis in population space: nonzero only on the sister pair, weighted by sqrt(phi)
     sister_pop_axis = np.zeros(K)
-    a, b = 2, 3  # YRI, YRI2
+    a, b = 2, 3  # YRI1, YRI2
     s = phi[a] + phi[b]
     sister_pop_axis[a] = np.sqrt(phi[b] / s)
     sister_pop_axis[b] = -np.sqrt(phi[a] / s)

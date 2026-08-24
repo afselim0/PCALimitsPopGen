@@ -7,16 +7,15 @@ msprime.Demography.stepping_stone_model only supports 1D, so the K x K grid is b
 directly here: K^2 isolated demes, each connected to its up/down/left/right neighbours
 at rate m.
 
-K, Ne and L are fixed parameters (fixed.K, fixed.Ne, fixed.L); only m is swept. The
-migration grid is normally centred around K's own critical rate
-(stepping_stone_grid.sweep_plan); sweep.min/sweep.max override this with an explicit
-range when both are given.
+K, Ne and L are fixed parameters (fixed.K, fixed.Ne, fixed.L). The swept parameter is
+1/M, the inverse population-scaled migration rate, log-spaced over
+[sweep.inv_M_min, sweep.inv_M_max] in sweep.num_inv_M steps and converted to a migration
+rate through M = 4 Ne m -- see stepping_stone_grid.inverse_M_grid.
 
 The leading eigenvalue is doubly degenerate here (mu_10 = mu_01) -- the recoverable
 object is a 2D subspace, not a single PC. See src/analysis/SteppingStoneDetection.py.
 
-Output directory: K<K>, with its own simulation_parameters.csv and m<value>.npy -- relied
-on by src/analysis/stepping_stone_detection.py and must not change.
+Output directory: K<K>, with its own simulation_parameters.csv and invM<value>.npy.
 """
 import os
 import sys
@@ -30,15 +29,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 from utils import simulate_haplotypes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/simulations/
-from sweep import axis_values, check_no_collisions, run_table, run_one_row
-from stepping_stone_grid import (PANMICTIC_M_THRESHOLD, PANMICTIC_TOLERANCE, maybe_pool,
-                                 mixing_time, sweep_plan)
+from sweep import check_no_collisions, run_table, run_one_row
+from stepping_stone_grid import (PANMICTIC_M_THRESHOLD, PANMICTIC_TOLERANCE,
+                                 inverse_M_grid, maybe_pool, mixing_time, sweep_plan)
 
 DIMENSION = 2
 
 
-def format_m(m):
-    return f"m{m:.4e}"
+def format_inv_M(inv_M):
+    return f"invM{inv_M:.4e}"
 
 
 def cell_name(K):
@@ -76,19 +75,17 @@ def demography(K, Ne, m, pool_threshold=PANMICTIC_M_THRESHOLD,
 
 def build_parameter_table(cfg):
     fixed, sweep = cfg["fixed"], cfg["sweep"]
-    K, n_per_deme, L = fixed["K"], fixed["n_per_deme"], fixed["L"]
+    K, n_per_deme, L, Ne = fixed["K"], fixed["n_per_deme"], fixed["L"], fixed["Ne"]
     random_seed = cfg["random_seed"]
-    Ne_fixed = fixed.get("Ne")
-    explicit_range = "min" in sweep and "max" in sweep
 
-    cell = sweep_plan([K], n_per_deme, L, dimension=DIMENSION,
-                      num_m=sweep.get("num_m", 40), span=sweep.get("span", 3.0),
-                      Ne=Ne_fixed, target_m=None if Ne_fixed else sweep.get("target_m", 0.02))[0]
-    m_values = (axis_values(sweep["min"], sweep["max"], sweep.get("num_m", 40),
-                            sweep.get("spacing", "log"))
-               if explicit_range else cell["m_values"])
-    simIDs = [format_m(m) for m in m_values]
-    check_no_collisions(simIDs, "m values")
+    # The sweep is specified in 1/M, the scaled units the theory uses; Ne turns each
+    # grid point back into the migration rate msprime needs, via M = 4 Ne m.
+    inv_M, m_values = inverse_M_grid(sweep["inv_M_min"], sweep["inv_M_max"],
+                                     sweep["num_inv_M"], Ne,
+                                     sweep.get("spacing", "log"))
+    cell = sweep_plan([K], n_per_deme, L, dimension=DIMENSION, Ne=Ne)[0]
+    simIDs = [format_inv_M(v) for v in inv_M]
+    check_no_collisions(simIDs, "1/M values")
 
     # Record where the panmictic switch falls (NaN where the cell stays fully structured),
     # so the on-disk table says which simulations used the approximation.
@@ -102,9 +99,9 @@ def build_parameter_table(cfg):
         "simID": simIDs,
         "outdir_suffix": cell_name(K),
         "K": K, "K_demes": cell["K_demes"], "m": m_values,
-        "M": 4 * cell["Ne"] * m_values,
+        "M": 4 * Ne * m_values, "inv_M": inv_M,
         "M_c": cell["M_c"], "M_c_approx": cell["M_c_approx"], "m_c": cell["m_c"],
-        "Ne": cell["Ne"], "n_per_deme": n_per_deme, "N": cell["N"], "L": L,
+        "Ne": Ne, "n_per_deme": n_per_deme, "N": cell["N"], "L": L,
         "t_pooled": t_pooled,
         "random_seed": random_seed + np.arange(len(m_values)),
     })

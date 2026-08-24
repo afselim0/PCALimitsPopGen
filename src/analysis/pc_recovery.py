@@ -31,6 +31,7 @@ from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from utils import compute_sample_covariance, compute_F_hat
+from threshold_and_overlap import eta_moments, approx_nu_c, approx_overlap, exact_nu_c
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIMULATION_ROOT = os.path.join(_PROJECT_ROOT, "results", "simulations")
@@ -40,7 +41,8 @@ def _parse_simID(simID):
     """
     Parameters encoded in a filename stem, as {name: float}.
 
-    Covers every convention in results/simulations: Fst<v>, m<v>, and t<v>_Fst<v>. A stem
+    Covers every convention in results/simulations: Fst<v>, invM<v> (the stepping-stone
+    kinds, whose swept parameter is 1/M), and t<v>_Fst<v>. A stem
     that matches nothing yields an empty dict rather than an error, so an unrecognized
     naming scheme degrades to "no parsed parameters" instead of failing the load.
     """
@@ -98,22 +100,37 @@ def load_simulations(simdir, mmap=True):
     return params, arrays
 
 
-def subsample(Z, n, L=None, rng=None):
+def subsample(Z, n, L=None, rng=None, n_available=None, L_polymorphic=False):
     """
     Draw n_a samples from each subpopulation and (optionally) L SNP columns.
 
-    Rows of Z are assumed block-ordered with Z.shape[0] // K samples per subpopulation,
-    which is how every simulation in src/simulations writes them.
+    Rows of Z are block-ordered by subpopulation. By default each block is assumed the
+    same size, Z.shape[0] // K, which is how every equal-sampling simulation in
+    src/simulations writes them. Pass n_available (length K, block sizes summing to
+    Z.shape[0]) for demographies with unequal per-subpopulation sample sizes, e.g.
+    split_stepping_stone's panmictic A block vs. its many smaller per-deme B blocks.
 
     Monomorphic loci are dropped *after* the rows are subset, not before: a locus that
     segregates in the full sample may be fixed in the subsample, and leaving those columns
     in would inflate the raw SNP count with columns that carry no signal.
 
+    That ordering means L is a pre-filter draw count by default, so the surviving width
+    falls short of L by however many drawn loci turned out monomorphic -- and by more at
+    small n, which is exactly when a sweep wants L held fixed. L_polymorphic=True instead
+    filters first and then draws exactly L of the polymorphic columns, so every cell comes
+    back the same width; it raises if fewer than L are available.
+
     Args:
         Z: (N_full, L_full) genotype matrix.
         n: per-subpopulation sample sizes, length K.
-        L: number of SNP columns to draw before the polymorphic filter. None keeps all.
+        L: number of SNP columns. Drawn before the polymorphic filter by default, so the
+            result is narrower than L; with L_polymorphic=True it is the exact output
+            width. None keeps all.
         rng: numpy Generator.
+        n_available: per-subpopulation block sizes actually present in Z, length K. None
+            assumes every block has Z.shape[0] // K rows (the equal-sampling default).
+        L_polymorphic: draw L from the polymorphic columns rather than from all columns,
+            making L the exact number of SNPs returned.
 
     Returns:
         (sum(n), L_polymorphic) float32 array.
@@ -121,15 +138,35 @@ def subsample(Z, n, L=None, rng=None):
     rng = np.random.default_rng() if rng is None else rng
     n = np.asarray(n, dtype=int)
     K = len(n)
-    n_per_pop = Z.shape[0] // K
-    if Z.shape[0] % K:
-        raise ValueError(f"{Z.shape[0]} rows do not divide evenly into K={K} subpopulations")
-    if np.any(n > n_per_pop):
-        raise ValueError(f"requested {n.max()} samples but only {n_per_pop} are available "
-                         f"per subpopulation")
+    if n_available is None:
+        if Z.shape[0] % K:
+            raise ValueError(f"{Z.shape[0]} rows do not divide evenly into K={K} subpopulations")
+        n_available = np.full(K, Z.shape[0] // K, dtype=int)
+    else:
+        n_available = np.asarray(n_available, dtype=int)
+        if len(n_available) != K:
+            raise ValueError(f"n_available has {len(n_available)} entries but n has {K}")
+        if n_available.sum() != Z.shape[0]:
+            raise ValueError(f"n_available sums to {n_available.sum()} but Z has "
+                             f"{Z.shape[0]} rows")
+    if np.any(n > n_available):
+        raise ValueError(f"requested {n.max()} samples but only {n_available.min()} are "
+                         f"available in the smallest subpopulation")
 
-    idx = np.sort(np.concatenate([a * n_per_pop + rng.choice(n_per_pop, n_a, replace=False)
-                                  for a, n_a in enumerate(n)]))
+    offsets = np.concatenate([[0], np.cumsum(n_available)[:-1]])
+    idx = np.sort(np.concatenate([off + rng.choice(avail, n_a, replace=False)
+                                  for off, avail, n_a in zip(offsets, n_available, n)]))
+    if L_polymorphic and L is not None:
+        # Every column has to be read before the polymorphic ones can be counted, so this
+        # path costs a full-width row slice; that is the price of an exact output width.
+        sub = np.asarray(Z[idx, :], dtype=np.float32)
+        freq = sub.mean(axis=0)
+        poly = np.flatnonzero((freq > 0) & (freq < 1))
+        if len(poly) < L:
+            raise ValueError(f"requested L={L} polymorphic SNPs but only {len(poly)} are "
+                             f"polymorphic in this subsample of {int(n.sum())} samples")
+        return sub[:, np.sort(rng.choice(poly, L, replace=False))]
+
     cols = np.sort(rng.choice(Z.shape[1], L, replace=False)) \
         if L is not None and L < Z.shape[1] else slice(None)
     # A single np.ix_ index avoids materializing the full-width row slice that
@@ -151,6 +188,13 @@ def effective_L(Z):
     p = np.asarray(Z, dtype=np.float64).mean(axis=0)
     v = p * (1.0 - p)
     return float(v.sum() ** 2 / (v ** 2).sum())
+
+
+def locus_moments(Z):
+    """(mu2, mu3, delta) of the per-locus weights v = p(1-p), over polymorphic columns."""
+    p = np.asarray(Z, dtype=np.float64).mean(axis=0)
+    v = p * (1.0 - p)
+    return eta_moments(v[v > 0])
 
 
 def theoretical_eigenvectors(T, n, indices=None, rtol=1e-8):
@@ -267,6 +311,12 @@ def eigenvectors_by_overlap(Z, V_theory):
     a deeper structure axis outranks it: on OOA3 the CEU/CHB/YRI splits carry eigenvalues of
     65, 21 and 11 while the recent YRI/YRI2 split sits at ~2, so the sister axis is rank 2
     and asking for rank 0 returns a near-orthogonal vector (overlap 2e-4 against 0.97).
+    Use this only when the axis's rank genuinely isn't known ahead of time -- if it is
+    (e.g. deterministically rank 2, as measured for the OOA3 sister axis in
+    SisterEigenvalue.py/SisterPCAlignment.py), read that rank directly via
+    sample_eigenvectors instead: searching the full spectrum for a known-fixed rank only
+    inflates the no-signal baseline (see support_overlap_floor) without changing which
+    eigenvector gets picked.
 
     Each theoretical axis is matched to its own argmax, so a permuted or non-contiguous set
     of ranks is handled. Matches are taken greedily and without replacement, which keeps two
@@ -278,7 +328,7 @@ def eigenvectors_by_overlap(Z, V_theory):
     V = V[:, order]
 
     V_theory = np.atleast_2d(np.asarray(V_theory, dtype=float))
-    overlaps = np.abs(V.T @ V_theory)               # (N, k)
+    overlaps = np.abs(V.T @ V_theory)               # (n_candidates, k)
 
     picked, out = set(), []
     for j in range(V_theory.shape[1]):
@@ -299,10 +349,14 @@ def support_overlap_floor(V_theory, n, num_candidates=None, num_draws=20000, see
 
       * **Support.** The sister axis is exactly zero outside the sister rows, so only those
         rows contribute. The ambient dimension is the size of the axis's support, not N.
-        Measured: at fixed n_1+n_2 = 200 the floor is flat (0.144-0.169) however the 200 are
-        split, so the support size is what matters and not any balance-weighted dimension.
+        Measured (under the old full-spectrum eigenvectors_by_overlap search): at fixed
+        n_1+n_2 = 200 the floor is flat (0.144-0.169) however the 200 are split, so the
+        support size is what matters and not any balance-weighted dimension.
       * **Selection.** eigenvectors_by_overlap returns the *best-matching* eigenvector out of
-        many candidates, and a maximum over draws sits well above the mean of one draw.
+        `num_candidates` candidates, and a maximum over draws sits well above the mean of
+        one draw. Pass num_candidates matching how many candidates the caller actually
+        searches over -- for a single fixed-rank read (no search at all) that is 1, which
+        reduces this to the mean of one draw in the support subspace.
 
     Both are estimated by direct simulation rather than a closed form: sqrt(2 ln d / d), the
     usual max-of-Gaussians heuristic, is off by 0.54-0.81 across this range.
@@ -334,21 +388,34 @@ def random_overlap_floor(N):
     return float(np.sqrt(2.0 / (np.pi * N)))
 
 
-def analytical_cosine(nu, gamma, N=None):
+def analytical_cosine(nu, gamma, N=None, phi=None, eps=None,
+                      gamma_raw=None, mu2=None, delta=None):
     """
-    The BBP limiting cosine similarity between a sample PC and its theoretical axis.
-
-        overlap^2 = (1 - gamma/nu^2) / (1 + gamma/nu)    for nu > sqrt(gamma), else 0
+    The limiting cosine similarity between a sample PC and its theoretical axis.
 
     Returned as |cos| = sqrt(overlap^2), matching the scale of the measured cosines.
+
+    Two routes, chosen by what is supplied:
+
+      * Exact (preferred): when phi, gamma_raw and the locus moments are given, the
+        overlap comes from src/threshold_and_overlap, which accounts for
+        heteroskedasticity on both sides -- unequal eps_a across populations and the
+        spread of the per-locus weights beyond its leading mu2 term. eps=None is read
+        as eps_a = 0 for all a, which is the equal-tau special case of the same path.
+      * Flat fallback: (1 - gamma/nu^2)/(1 + gamma/nu) for nu > sqrt(gamma), else 0.
+        This is the eps == 0, eta == 1 limit and is kept only for callers that have not
+        been given the extra quantities.
+
+    Note gamma vs gamma_raw. gamma = N/L_eff already carries the mu2 part of the locus
+    heteroskedasticity, since L_eff = L_raw/mu2 identically; the theory module applies
+    mu2 itself, so it must be handed the raw N/L_raw instead. Passing gamma there would
+    apply mu2 twice.
 
     Below threshold the limiting overlap is 0, but that is an N -> infinity statement: at
     finite N an uninformative PC still has expected |cos| = sqrt(2/(pi*N)) against any
     fixed axis simply because two vectors in finite dimension are never exactly orthogonal.
     Passing N floors the prediction there, so it is comparable with a measurement that can
-    never go below it. The floor is applied as a maximum rather than only where the BBP
-    value is 0, which keeps the prediction continuous; in practice BBP already exceeds the
-    floor at its first positive point, so the two agree.
+    never go below it.
 
     Per-axis values are only individually meaningful when the axes are non-degenerate:
     inside a degenerate multiplet every member shares the same nu, so the predictions are
@@ -357,16 +424,30 @@ def analytical_cosine(nu, gamma, N=None):
 
     Args:
         nu: structure eigenvalue(s), scalar or array.
-        gamma: aspect ratio N / L_eff.
+        gamma: aspect ratio N / L_eff (used by the flat fallback).
         N: sample size. When given, the prediction is floored at the finite-N random
             overlap sqrt(2/(pi*N)); when None the asymptotic 0 is kept.
+        phi: sampling proportions n_a/N. Required for the exact route.
+        eps: within-population deviations tau_a/tau_bar - 1. None means all zero.
+        gamma_raw: aspect ratio N / L_raw. Required for the exact route.
+        mu2, delta: locus-weight moments from locus_moments. Required for the exact route.
 
     Returns:
         (per_axis, mean): the |cos| for each nu, and their mean.
     """
     nu = np.atleast_1d(np.asarray(nu, dtype=float))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ov = np.where(nu > np.sqrt(gamma), (1 - gamma / nu ** 2) / (1 + gamma / nu), 0.0)
+    exact = phi is not None and gamma_raw is not None and mu2 is not None and delta is not None
+
+    if exact:
+        phi = np.asarray(phi, dtype=float)
+        eps_a = np.zeros_like(phi) if eps is None else np.asarray(eps, dtype=float)
+        nu_c = approx_nu_c(phi, eps_a, gamma_raw, mu2, delta)
+        ov = np.array([approx_overlap(float(v), phi, eps_a, gamma_raw, mu2, delta, nu_c=nu_c)
+                       for v in nu])
+    else:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ov = np.where(nu > np.sqrt(gamma), (1 - gamma / nu ** 2) / (1 + gamma / nu), 0.0)
+
     per_axis = np.sqrt(np.clip(ov, 0.0, 1.0))
     if N is not None:
         per_axis = np.maximum(per_axis, random_overlap_floor(N))
@@ -388,8 +469,8 @@ def _median_se(x):
     return float(1.4826 * mad / np.sqrt(x.size))
 
 
-def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=None,
-                select_by_overlap=False):
+def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=None, eps=None,
+                select_by_overlap=False, n_available=None, L_polymorphic=False):
     """
     How well the sample PCs at `indices` recover the theoretical axes V_theory.
 
@@ -404,6 +485,9 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
             theoretical_eigenvectors().
         indices: which sample PCs to compare against them, 0 = largest eigenvalue.
         L: SNP columns to subsample per replicate. None keeps all polymorphic loci.
+        L_polymorphic: make L the exact polymorphic width of each replicate rather than a
+            pre-filter draw count -- see subsample(). Keeps L identical across cells whose
+            sample sizes differ, which a sweep over n needs.
         num_replicates: independent subsamples.
         seed: base seed; replicate r uses [seed, r].
         nu: the theoretical structure eigenvalues for V_theory, as returned by
@@ -414,12 +498,19 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         select_by_overlap: locate the sample eigenvectors by maximum overlap with V_theory
             instead of by rank, ignoring `indices`. Required whenever the axis of interest
             is not a leading PC -- see eigenvectors_by_overlap.
+        n_available: per-subpopulation block sizes actually present in Z, length K. None
+            assumes every block has the same size (see subsample()); pass this for
+            demographies with unequal per-subpopulation sample sizes.
 
     Returns:
         dict with, for the subspace as a whole, median_cos / se_cos and the matching
         zero-parameter prediction analytical_cos; the same quantities per axis in
         cos_per_axis / se_cos_per_axis / analytical_cos_per_axis; the median Procrustes
         distance; and the measured L_eff, L_raw and gamma = N / L_eff.
+
+        cos_replicates holds the individual replicate cosines that median_cos reduces
+        (cos_replicates_per_axis the per-axis matrix), so a caller can record the whole
+        cloud and fit a transition curve through it -- see crossing_fit.
     """
     n = np.asarray(n, dtype=int)
     indices = np.atleast_1d(indices)
@@ -433,21 +524,33 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
     by_magnitude = nu is not None and np.any(np.asarray(nu) < 0)
 
     cos_all, dists, L_effs, L_raws = [], [], [], []
+    mu2s, deltas = [], []
     for rep in range(num_replicates):
         rng = np.random.default_rng([seed, rep])
-        sub = subsample(Z, n, L, rng)
+        sub = subsample(Z, n, L, rng, n_available=n_available,
+                        L_polymorphic=L_polymorphic)
         V_s = (eigenvectors_by_overlap(sub, V_theory) if select_by_overlap
                else sample_eigenvectors(sub, indices, by_magnitude=by_magnitude))
         cos_all.append(principal_cosines(V_theory, V_s))
         dists.append(procrustes_distance(V_theory, V_s))
         L_effs.append(effective_L(sub))
         L_raws.append(sub.shape[1])
+        m2, _, dl = locus_moments(sub)
+        mu2s.append(m2)
+        deltas.append(dl)
 
     cos_all = np.array(cos_all)                 # (num_replicates, k)
     mean_cos = cos_all.mean(axis=1)             # subspace similarity per replicate
 
     L_eff_med = float(np.median(L_effs))
+    L_raw_med = float(np.median(L_raws))
     gamma = n.sum() / L_eff_med
+    # gamma_raw is the aspect ratio the theory module expects: it applies mu2 itself, and
+    # gamma = N/L_eff already has mu2 folded in (L_eff == L_raw/mu2 exactly), so passing
+    # gamma there would square the correction.
+    mu2_med = float(np.median(mu2s))
+    delta_med = float(np.median(deltas))
+    gamma_raw = n.sum() / L_raw_med
 
     # The zero-parameter prediction alongside the measurement: gamma comes from the
     # measured L_eff and nu from the demography, so nothing here is fitted.
@@ -455,11 +558,19 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         analytical_per_axis = np.full(len(indices), np.nan)
         analytical_mean = np.nan
     else:
-        analytical_per_axis, analytical_mean = analytical_cosine(nu, gamma, N=n.sum())
+        analytical_per_axis, analytical_mean = analytical_cosine(
+            nu, gamma, N=n.sum(), phi=n / n.sum(), eps=eps,
+            gamma_raw=gamma_raw, mu2=mu2_med, delta=delta_med)
 
     return dict(
         median_cos=float(np.median(mean_cos)),
         se_cos=_median_se(mean_cos),
+        # Per-replicate values, kept so callers can fit a curve through the whole cloud
+        # rather than through the medians: cos_replicates is the subspace similarity of
+        # each replicate, cos_replicates_per_axis the (num_replicates, k) matrix behind it.
+        cos_replicates=mean_cos,
+        cos_replicates_per_axis=cos_all,
+        procrustes_replicates=np.asarray(dists, dtype=float),
         cos_per_axis=np.median(cos_all, axis=0),
         se_cos_per_axis=np.array([_median_se(cos_all[:, j]) for j in range(cos_all.shape[1])]),
         analytical_cos=analytical_mean,
@@ -467,8 +578,11 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         procrustes_d=float(np.median(dists)),
         se_procrustes=_median_se(dists),
         L_eff=L_eff_med,
-        L_raw=float(np.median(L_raws)),
+        L_raw=L_raw_med,
         gamma=gamma,
+        gamma_raw=gamma_raw,
+        mu2=mu2_med,
+        delta=delta_med,
         nu=np.atleast_1d(np.asarray(nu, dtype=float)) if nu is not None else None,
         N=int(n.sum()), K=len(n), k=len(indices),
         num_replicates=num_replicates, seed=seed)

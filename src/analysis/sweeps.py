@@ -19,7 +19,15 @@ rather than reshape. Each row carries the measured median_cos next to analytical
 BBP prediction built from the measured L_eff and the theoretical nu -- no free parameters,
 so the two columns can be compared directly.
 
-Outputs (results/analysis/<name>): sweep.csv
+A second file holds one row per (simulation, cell, replicate): the plotting scripts fit a
+transition curve through that whole cloud and report where it crosses a target overlap,
+rather than drawing the medians. The summary file is kept because other figures read it.
+
+Outputs (results/analysis/<name>), for a sweep written as sweep.csv:
+    sweep.csv              one row per (simulation, cell), the median summary
+    sweep_replicates.csv   one row per (simulation, cell, replicate)
+    sweep_crossings.csv    one row per cell: the swept value at which the measured overlap
+                           crosses the target, beside the value at which theory does
 """
 import argparse
 import os
@@ -30,6 +38,7 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from crossing_fit import crossings_table, replicate_rows
 from pc_recovery import (load_simulations, pc_recovery, theoretical_eigenvectors,
                          SIMULATION_ROOT)
 
@@ -74,7 +83,7 @@ def run_sweep(simdir, T_from_params, schemes, indices, name, outdir=None, L=None
         candidates = [c for c in ("Fst", "m", "t_split", "t") if c in params.columns]
         param_col = candidates[0] if candidates else None
 
-    rows = []
+    rows, rep_rows = [], []
     total = len(arrays) * len(schemes)
     bar = tqdm(total=total, disable=not verbose, desc=desc)
     for i, (_, prow) in enumerate(params.iterrows()):
@@ -90,7 +99,10 @@ def run_sweep(simdir, T_from_params, schemes, indices, name, outdir=None, L=None
                        nu_min=float(np.min(nu)), nu_max=float(np.max(nu)))
             if param_col is not None:
                 row[param_col] = prow[param_col]
-            for key in ("N", "K", "k", "L_raw", "L_eff", "gamma", "median_cos", "se_cos",
+            # mu2/delta ride along because the plotting scripts rebuild the theoretical
+            # overlap from them (the two-moment route) without reopening the genotypes.
+            for key in ("N", "K", "k", "L_raw", "L_eff", "gamma", "gamma_raw", "mu2",
+                        "delta", "median_cos", "se_cos",
                         "analytical_cos", "procrustes_d", "se_procrustes",
                         "num_replicates", "seed"):
                 row[key] = res[key]
@@ -102,6 +114,13 @@ def run_sweep(simdir, T_from_params, schemes, indices, name, outdir=None, L=None
                 row[f"analytical_cos_axis{axis}"] = float(res["analytical_cos_per_axis"][j])
                 row[f"nu_axis{axis}"] = float(nu[j])
             rows.append(row)
+
+            # One row per replicate of this cell, for the curve fit. The per-axis cosines
+            # are averaged into the subspace similarity, matching what median_cos reduces.
+            base = {k: v for k, v in row.items() if k != param_col}
+            rep_rows.extend(replicate_rows(base, prow[param_col] if param_col else np.nan,
+                                           param_col or "x", res["cos_replicates"],
+                                           seed=seed))
             bar.update(1)
     bar.close()
 
@@ -109,8 +128,23 @@ def run_sweep(simdir, T_from_params, schemes, indices, name, outdir=None, L=None
     os.makedirs(outdir, exist_ok=True)
     out_path = os.path.join(outdir, filename)
     df.to_csv(out_path, index=False)
+
+    df_rep = pd.DataFrame(rep_rows)
+    rep_path = os.path.join(outdir, filename.replace(".csv", "_replicates.csv"))
+    df_rep.to_csv(rep_path, index=False)
+
+    # Where each curve crosses the target overlap, measured vs theory, as a table -- so the
+    # comparison exists as a number without having to draw the figure. The curve here is
+    # one sampling scheme; the swept simulation parameter is the x axis.
+    df_cross = crossings_table(df_rep, ["scheme"], param_col, extra_keys=(
+        "N", "n_min", "n_max", "phi_min", "L_eff", "L_raw", "gamma", "num_replicates"))
+    cross_path = os.path.join(outdir, filename.replace(".csv", "_crossings.csv"))
+    df_cross.to_csv(cross_path, index=False)
+
     if verbose:
         print(f"wrote {len(df)} rows -> {out_path}")
+        print(f"wrote {len(df_rep)} replicate rows -> {rep_path}")
+        print(f"wrote {len(df_cross)} crossing rows -> {cross_path}")
     return df
 
 

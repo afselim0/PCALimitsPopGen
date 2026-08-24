@@ -3,24 +3,25 @@ stdpopsim's HomSap/OutOfAfrica_3G09 (Gutenkunst et al. 2009), extended with a re
 split within the African (YRI) population, over a sweep of split times t_split.
 
 The base model has three populations (YRI, CEU, CHB) with the standard OOA / CEU-CHB
-split history. A fourth population, YRI2, is added: going backward in time, YRI and
-YRI2 are both sampled at present and merge into a single YRI lineage at t_split
-generations ago (msprime's add_population_split), rejoining the unmodified OOA history
-above that. YRI2 inherits YRI's migration rates with CEU and CHB.
+split history. YRI is replaced by two sibling populations, YRI1 and YRI2: going backward
+in time, both are sampled at present and merge into their (unsampled) ancestral YRI
+lineage at t_split generations ago (msprime's add_population_split), rejoining the
+unmodified OOA history above that. Each inherits YRI's migration rates with CEU and CHB;
+YRI1 and YRI2 do not migrate with each other.
 
-The theoretical Fst between YRI and YRI2 is computed exactly from the demography via
+The theoretical Fst between YRI1 and YRI2 is computed exactly from the demography via
 DemographyDebugger.mean_coalescence_time, as 1 - t_within / t_between.
 
-fixed.n_per_pop may be a scalar (uniform across CEU/CHB/YRI/YRI2) or a per-population
-dict, e.g. {CEU: 5000, CHB: 5000, YRI: 2000, YRI2: 2000}.
+fixed.n_per_pop may be a scalar (uniform across CEU/CHB/YRI1/YRI2) or a per-population
+dict, e.g. {CEU: 5000, CHB: 5000, YRI1: 2000, YRI2: 2000}.
 
 t_split is the swept parameter, but files are named by the numerically-computed
-Fst(YRI, YRI2), not t_split -- Fst is the quantity of scientific interest, and t_split is
+Fst(YRI1, YRI2), not t_split -- Fst is the quantity of scientific interest, and t_split is
 merely how it's parameterized (and is still recorded as a column in
 simulation_parameters.csv for reproducibility).
 
 Output: Fst<Fst>.npy, the (sum of n_per_pop) x L genotype matrix (np.bool_).
-Sample order is alphabetical by population: CEU, CHB, YRI, YRI2.
+Sample order is alphabetical by population: CEU, CHB, YRI1, YRI2.
 """
 import copy
 import os
@@ -37,7 +38,7 @@ from utils import simulate_haplotypes
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/simulations/
 from sweep import axis_values, check_no_collisions, run_table, run_one_row
 
-POPS = ["CEU", "CHB", "YRI", "YRI2"]
+POPS = ["CEU", "CHB", "YRI1", "YRI2"]
 
 
 def format_simID(Fst):
@@ -56,33 +57,45 @@ def _n_per_pop_dict(n_per_pop):
 
 def demography(t_split):
     """
-    stdpopsim's OutOfAfrica_3G09 with a fourth population YRI2 split off YRI at
-    t_split generations ago. YRI2 mirrors YRI's migration rates with CEU/CHB.
+    stdpopsim's OutOfAfrica_3G09 with YRI split symmetrically into YRI1 and YRI2 at
+    t_split generations ago: both are new populations descending from ancestral YRI,
+    which is not itself sampled. Each inherits YRI's migration rates with CEU/CHB.
+
+    dbg["YRI"].initially_active is forced True before anything else touches the model:
+    left at its stdpopsim default (None, which add_population_split later reads as
+    falsy), demes.to_demes() mis-derives YRI's existence window as ending at its *own*
+    ancestral-merge event (CEU+CHB into YRI at t=5600, from the base model) rather than
+    extending back to time 0 as PopulationSplit(ancestral="YRI") requires -- so any
+    split below t=5600 is rejected by the demesdraw preview even though the simulated
+    demography itself is unaffected (msprime does not use to_demes() to simulate).
     """
     species = stdpopsim.get_species("HomSap")
     model = species.get_demographic_model("OutOfAfrica_3G09")
     dbg = copy.deepcopy(model.model)  # model.model is cached/shared -- copy before mutating
+    dbg["YRI"].initially_active = True
 
     yri = dbg["YRI"].id
-    dbg.add_population(name="YRI2", initial_size=dbg["YRI"].initial_size, initially_active=True)
-    yri2 = dbg["YRI2"].id
+    for name in ("YRI1", "YRI2"):
+        dbg.add_population(name=name, initial_size=dbg["YRI"].initial_size,
+                           initially_active=True)
+        pid = dbg[name].id
+        dbg.migration_matrix[pid, :] = dbg.migration_matrix[yri, :]
+        dbg.migration_matrix[:, pid] = dbg.migration_matrix[:, yri]
+        dbg.migration_matrix[pid, yri] = 0
+        dbg.migration_matrix[yri, pid] = 0
+    dbg.migration_matrix[dbg["YRI1"].id, dbg["YRI2"].id] = 0
+    dbg.migration_matrix[dbg["YRI2"].id, dbg["YRI1"].id] = 0
 
-    dbg.migration_matrix[yri2, :] = dbg.migration_matrix[yri, :]
-    dbg.migration_matrix[:, yri2] = dbg.migration_matrix[:, yri]
-    dbg.migration_matrix[yri2, yri] = 0
-    dbg.migration_matrix[yri, yri2] = 0
-
-    dbg.add_population_split(time=t_split, derived=["YRI2"], ancestral="YRI")
-    dbg["YRI"].initially_active = True  # still sampled at present, not just post-split
+    dbg.add_population_split(time=t_split, derived=["YRI1", "YRI2"], ancestral="YRI")
     dbg.sort_events()
     return dbg
 
 
 def theoretical_Fst(dem):
-    """Exact Fst(YRI, YRI2) = 1 - t_within / t_between, both via DemographyDebugger."""
+    """Exact Fst(YRI1, YRI2) = 1 - t_within / t_between, both via DemographyDebugger."""
     d = dem.debug()
-    t_within = d.mean_coalescence_time(lineages={"YRI": 2})
-    t_between = d.mean_coalescence_time(lineages={"YRI": 1, "YRI2": 1})
+    t_within = d.mean_coalescence_time(lineages={"YRI1": 2})
+    t_between = d.mean_coalescence_time(lineages={"YRI1": 1, "YRI2": 1})
     return 1.0 - t_within / t_between
 
 
@@ -103,7 +116,7 @@ def build_parameter_table(cfg):
         "t_split": t_values,
         "Fst": Fst_values,
         "n_CEU": n_dict["CEU"], "n_CHB": n_dict["CHB"],
-        "n_YRI": n_dict["YRI"], "n_YRI2": n_dict["YRI2"],
+        "n_YRI1": n_dict["YRI1"], "n_YRI2": n_dict["YRI2"],
         "N": N, "L": L,
         "random_seed": random_seed + np.arange(len(t_values)),
     })

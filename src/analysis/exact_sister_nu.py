@@ -29,14 +29,15 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-POPS = ["CEU", "CHB", "YRI", "YRI2"]
+POPS = ["CEU", "CHB", "YRI1", "YRI2"]
 SISTER = (2, 3)
 RTOL = 1e-3          # the msprime default fails to converge on this model
 MAX_ITER = 20
 
 
 def _demography(t_split):
-    """OOA3 with the YRI2 split, loaded from the simulation kind module by path."""
+    """OOA3 with the symmetric YRI1/YRI2 split, loaded from the simulation kind module by
+    path."""
     import importlib.util
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(root, "simulations", "demographies", "african_split.py")
@@ -46,14 +47,14 @@ def _demography(t_split):
     return mod.demography(t_split)
 
 
-# Splitting YRI2 off YRI at t_split leaves the CEU/CHB/YRI history untouched, so the six
-# pairs among those three are independent of t_split and are integrated once. Only the four
-# pairs involving YRI2 move. They are *not* recoverable from their YRI counterparts by
-# symmetry: at t_split = 1000, T[YRI2,YRI2] differs from T[YRI,YRI] by 1.9e-3 relative and
-# T[CEU,YRI2] from T[CEU,YRI] by 8.0e-3, both growing with t_split. Those are small but
-# comparable to the effect under test, so the four are computed exactly rather than
-# approximated.
-BACKBONE = [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]
+# YRI1 and YRI2 are both new populations descending from the unsampled ancestral YRI, so
+# every pair -- not just those touching YRI2 -- depends on t_split: a YRI1 or YRI2 lineage
+# spends time waiting to reach t_split before it behaves like the old single-YRI backbone,
+# and that wait is itself t_split-dependent. Nothing here is cacheable across t_split.
+# Exact symmetry between the two siblings still halves the work: T[CEU,YRI1]=T[CEU,YRI2],
+# T[CHB,YRI1]=T[CHB,YRI2], T[YRI1,YRI1]=T[YRI2,YRI2], so only 7 of the 10 pairs are unique.
+UNIQUE_PAIRS = [(0, 0), (1, 1), (0, 1), (2, 2), (0, 2), (1, 2), (2, 3)]
+MIRROR = {(0, 3): (0, 2), (1, 3): (1, 2), (3, 3): (2, 2)}
 
 
 def _pair(dbg, pops, i, j):
@@ -61,30 +62,17 @@ def _pair(dbg, pops, i, j):
     return dbg.mean_coalescence_time(lineages=lineages, rtol=RTOL, max_iter=MAX_ITER)
 
 
-def pop_coal_times(t_split, pops=POPS, backbone=None):
-    """
-    K x K mean pairwise coalescent times, including the within-population diagonal.
-
-    `backbone` supplies the six t_split-independent entries so they are not recomputed.
-    """
+def pop_coal_times(t_split, pops=POPS):
+    """K x K mean pairwise coalescent times, including the within-population diagonal."""
     dbg = _demography(t_split).debug()
     K = len(pops)
     T = np.zeros((K, K))
 
-    for i, j in BACKBONE:
-        T[i, j] = T[j, i] = backbone[i, j] if backbone is not None else _pair(dbg, pops, i, j)
-    for i in range(K):                       # every pair involving YRI2 (index 3)
-        T[i, 3] = T[3, i] = _pair(dbg, pops, i, 3)
+    for i, j in UNIQUE_PAIRS:
+        T[i, j] = T[j, i] = _pair(dbg, pops, i, j)
+    for (i, j), (si, sj) in MIRROR.items():
+        T[i, j] = T[j, i] = T[si, sj]
     return T
-
-
-def compute_backbone(pops=POPS, t_split=1000.0):
-    """The six CEU/CHB/YRI entries. Any t_split gives the same values."""
-    dbg = _demography(t_split).debug()
-    B = np.zeros((len(pops), len(pops)))
-    for i, j in BACKBONE:
-        B[i, j] = B[j, i] = _pair(dbg, pops, i, j)
-    return B
 
 
 def cached_coal_times(t_splits, cachefile, verbose=True):
@@ -96,15 +84,10 @@ def cached_coal_times(t_splits, cachefile, verbose=True):
 
     missing = [t for t in t_splits if f"{t:.4e}" not in cache]
     if missing:
-        if "backbone" not in cache:
-            if verbose:
-                print("  backbone (6 t_split-independent pairs)", flush=True)
-            cache["backbone"] = compute_backbone(pops=POPS)
-        backbone = cache["backbone"]
         for i, t in enumerate(missing):
             if verbose:
-                print(f"  YRI2 pairs {i+1}/{len(missing)}  t_split={t:.1f}", flush=True)
-            cache[f"{t:.4e}"] = pop_coal_times(t, backbone=backbone)
+                print(f"  coal times {i+1}/{len(missing)}  t_split={t:.1f}", flush=True)
+            cache[f"{t:.4e}"] = pop_coal_times(t)
 
         os.makedirs(os.path.dirname(cachefile), exist_ok=True)
         np.savez(cachefile, **cache)
@@ -136,6 +119,37 @@ def exact_spectrum(T, n):
     vals, vecs = np.linalg.eigh(G)
     order = np.argsort(vals)[::-1]
     return vals[order], vecs[:, order]
+
+
+def analytical_nu(T, n, Fst):
+    """
+    The closed-form sister eigenvalue nu = eps_0 + (2*N*phi_1*phi_2/s)*(tau/tau_bar)*Fst
+    (CLAUDE.md's OOA3 section), computed directly from the population-level coalescent-time
+    matrix T -- no numerical diagonalization.
+
+    This is exact for the sister pair's own within-population asymmetry (tau/tau_bar is not
+    assumed to be 1, unlike SisterEigenvalue.predicted_nu's N*H*Fst), but still an
+    approximation relative to exact_sister_nu: it does not capture the sister pair's
+    coupling to the other populations' structure, which only the full F_hat/G
+    diagonalization sees.
+
+    Args:
+        T: (K, K) population-level mean coalescent times, diag = tau.
+        n: per-population sample sizes, length K. SISTER indexes the sister pair.
+        Fst: theoretical Fst(sister_1, sister_2).
+    """
+    n = np.asarray(n, dtype=float)
+    N = n.sum()
+    phi = n / N
+    a, b = SISTER
+
+    tau = np.diag(T)
+    tau_bar = float(phi @ tau)
+    tau_sister = tau[a]  # tau[a] == tau[b] by construction (YRI1/YRI2 symmetry)
+    eps_0 = tau_sister / tau_bar - 1.0
+
+    s = phi[a] + phi[b]
+    return float(eps_0 + (2.0 * N * phi[a] * phi[b] / s) * (tau_sister / tau_bar) * Fst)
 
 
 def exact_sister_nu(T, n, axis):

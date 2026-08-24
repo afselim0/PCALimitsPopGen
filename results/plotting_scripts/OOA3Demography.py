@@ -1,15 +1,18 @@
 #%%
 """
-OOA3 demography and the YRI1/YRI2 sister-split PC, at three shallow split depths (3x3).
+OOA3 demography and the YRI1/YRI2 sister-split PC, at two split depths (2x3).
 
-Rows: t_split = 15, 50, 100 generations ago (log time axis throughout so all three are
-legible on one scale despite the shared axis reaching back through the full OOA history).
+Rows: the two Fst(YRI1, YRI2) targets, 1e-3 then 1e-2, whichever t_split the analysis
+matched them to (log time axis throughout, so both are legible on one scale despite the
+shared axis reaching back through the full OOA history).
 
 Columns:
     1  demesdraw preview of the demography at that t_split, with Fst(YRI1, YRI2) labelled
-    2  sample PC1 (by overlap with the predicted sister axis), N=2000, phi_1=phi_2=0.05,
-       YRI1/YRI2 colored red/blue, everyone else light grey
+    2  sample PC (by overlap with the predicted sister axis), N=1000, L=70,000 polymorphic
+       SNPs, phi_1=phi_2=0.05, YRI1/YRI2 colored red/blue, everyone else light grey.
+       Each PC panel is titled with its overlap against the predicted sister axis.
     3  the same at phi_1=phi_2=0.20
+
 
 Reads results/analysis/OOA3Demography, writes results/figures/OOA3Demography.pdf
 """
@@ -37,7 +40,7 @@ from demographies.african_split import demography as ooa3_demography
 COLOR_YRI1, COLOR_YRI2 = 'crimson', 'royalblue'
 COLOR_OTHER = '0.8'
 COLOR_ANCESTRAL = '0.6'
-LABELS = ["t15", "t50", "t100"]
+LABELS = ["fst1e-3", "fst1e-2"]   # weakest split first, so panel A is the marginal case
 
 # Fixed manually: demesdraw's automatic layout doesn't know YRI1/YRI2 should sit next to
 # each other, and its default line density (10 per migration edge) is too busy at this
@@ -104,7 +107,7 @@ def _preview_graph(dem, t_split):
 
 
 def panel_demography(ax, t_split, Fst):
-    """demesdraw tube plot, log time axis so all three depths are legible on one scale."""
+    """demesdraw tube plot, log time axis so both depths are legible on one scale."""
     dem = ooa3_demography(t_split)
     graph = _preview_graph(dem, t_split)
     demesdraw.tubes(graph, ax=ax, log_time=True, num_lines_per_migration=2,
@@ -114,13 +117,20 @@ def panel_demography(ax, t_split, Fst):
     ax.set_xticklabels(['' if t.get_text() == 'YRI' else t.get_text()
                         for t in ax.get_xticklabels()])
     ax.set_title(rf'$t_{{\mathrm{{split}}}}={t_split:.0f}$ generations ago' + '\n' +
-                rf'$F_{{ST}}={Fst:.2e}$')
+                rf'$F_{{ST}}={Fst:.0e}$')
 
 
 def panel_pc(ax, pc1_row):
-    """PC1 scatter: YRI1/YRI2 in red/blue, everyone else in light grey, mild jitter."""
+    """Sister-axis PC scatter: YRI1/YRI2 in red/blue, everyone else light grey, mild jitter.
+
+    The axis label reports the rank the analysis actually selected (pc1.csv's `rank`
+    column), which is normally 2 -- i.e. PC3, behind the three deep OOA splits.
+
+    Returns the overlap against the predicted sister axis, for the panel title.
+    """
     pop = pc1_row.population.values
     pc1 = pc1_row.pc1.values
+    rank = int(pc1_row["rank"].iloc[0])
     rng = np.random.default_rng(0)
     jitter = rng.uniform(-1, 1, len(pc1))
 
@@ -132,7 +142,8 @@ def panel_pc(ax, pc1_row):
         ax.scatter(pc1[sel], jitter[sel], s=5, color=color, alpha=0.85,
                   edgecolors='none', zorder=2, label=p)
     ax.set_yticks([])
-    ax.set_xlabel('PC1 (YRI1/YRI2 axis)')
+    ax.set_xlabel(f'PC{rank + 1} (YRI1/YRI2 axis)')
+    return float(pc1_row.overlap.iloc[0])
 
 
 def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
@@ -142,7 +153,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
     phis = sorted(pc1.phi.unique())
 
-    fig, axes = plt.subplots(3, 3, figsize=(12.0, 10.5))
+    fig, axes = plt.subplots(len(LABELS), 3, figsize=(12.0, 7.0))
 
     for i, label in enumerate(LABELS):
         t_split = float(meta.loc[label, "t_split"])
@@ -152,15 +163,16 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
         for j, phi in enumerate(phis, start=1):
             d = pc1[(pc1.label == label) & (pc1.phi == phi)]
-            panel_pc(axes[i, j], d)
-            if i == 0:
-                axes[i, j].set_title(rf'$\phi_1=\phi_2={phi:g}$')
+            overlap = panel_pc(axes[i, j], d)
+            axes[i, j].set_title(rf'$\phi_1=\phi_2={phi:g}$' + '\n' +
+                                 rf'$|\langle u_1,\hat{{u}}_1\rangle|={overlap:.3f}$')
 
-    axes[0, 1].legend(loc='upper right', fontsize=8, frameon=False, markerscale=2)
+    # axes[0, 1].legend(loc='upper right', fontsize=8, frameon=False, markerscale=2)
 
-    for i, letter in enumerate("ABC"):
-        axes[i, 0].text(-0.12, 1.0, letter, transform=axes[i, 0].transAxes,
-                        fontsize=13, fontweight='bold', va='bottom', ha='right')
+    for k, letter in enumerate("ABCDEFGHI"[:axes.size]):
+        ax = axes.flat[k]
+        ax.text(-0.12, 1.0, letter, transform=ax.transAxes,
+                fontsize=13, fontweight='bold', va='bottom', ha='right')
 
     fig.tight_layout()
     os.makedirs(figure_dir, exist_ok=True)

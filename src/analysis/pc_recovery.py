@@ -31,7 +31,8 @@ from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from utils import compute_sample_covariance, compute_F_hat
-from threshold_and_overlap import eta_moments, approx_nu_c, approx_overlap, exact_nu_c
+from threshold_and_overlap import (eta_moments, approx_nu_c, approx_overlap,
+                                   exact_nu_c, exact_overlap)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIMULATION_ROOT = os.path.join(_PROJECT_ROOT, "results", "simulations")
@@ -192,9 +193,19 @@ def effective_L(Z):
 
 def locus_moments(Z):
     """(mu2, mu3, delta) of the per-locus weights v = p(1-p), over polymorphic columns."""
+    return eta_moments(locus_weights(Z))
+
+
+def locus_weights(Z):
+    """The per-locus weights h = p(1-p) over polymorphic columns.
+
+    The exact route of src/threshold_and_overlap needs the whole vector, not the two
+    moments locus_moments reduces it to, so this is kept alongside rather than derived
+    from it.
+    """
     p = np.asarray(Z, dtype=np.float64).mean(axis=0)
     v = p * (1.0 - p)
-    return eta_moments(v[v > 0])
+    return v[v > 0]
 
 
 def theoretical_eigenvectors(T, n, indices=None, rtol=1e-8):
@@ -389,7 +400,7 @@ def random_overlap_floor(N):
 
 
 def analytical_cosine(nu, gamma, N=None, phi=None, eps=None,
-                      gamma_raw=None, mu2=None, delta=None):
+                      gamma_raw=None, mu2=None, delta=None, h=None):
     """
     The limiting cosine similarity between a sample PC and its theoretical axis.
 
@@ -397,11 +408,14 @@ def analytical_cosine(nu, gamma, N=None, phi=None, eps=None,
 
     Two routes, chosen by what is supplied:
 
-      * Exact (preferred): when phi, gamma_raw and the locus moments are given, the
-        overlap comes from src/threshold_and_overlap, which accounts for
-        heteroskedasticity on both sides -- unequal eps_a across populations and the
-        spread of the per-locus weights beyond its leading mu2 term. eps=None is read
-        as eps_a = 0 for all a, which is the equal-tau special case of the same path.
+      * Exact (preferred): when phi, gamma_raw and the per-locus weights h are given,
+        the overlap comes from src/threshold_and_overlap's exact_nu_c/exact_overlap,
+        which sum over every locus individually rather than through the two-moment
+        expansion. eps=None is read as eps_a = 0 for all a, which is the equal-tau
+        special case of the same path.
+      * Two-moment (gamma_eff): when h is absent but mu2/delta are given. Within ~0.5%
+        of exact for nu_c at gamma <= 0.05, but degrading to ~10% near threshold at
+        large gamma, so it is a fallback rather than the default.
       * Flat fallback: (1 - gamma/nu^2)/(1 + gamma/nu) for nu > sqrt(gamma), else 0.
         This is the eps == 0, eta == 1 limit and is kept only for callers that have not
         been given the extra quantities.
@@ -430,15 +444,25 @@ def analytical_cosine(nu, gamma, N=None, phi=None, eps=None,
         phi: sampling proportions n_a/N. Required for the exact route.
         eps: within-population deviations tau_a/tau_bar - 1. None means all zero.
         gamma_raw: aspect ratio N / L_raw. Required for the exact route.
-        mu2, delta: locus-weight moments from locus_moments. Required for the exact route.
+        mu2, delta: locus-weight moments from locus_moments. Used by the two-moment route.
+        h: per-locus weights p(1-p) from locus_weights. Selects the exact route.
 
     Returns:
         (per_axis, mean): the |cos| for each nu, and their mean.
     """
     nu = np.atleast_1d(np.asarray(nu, dtype=float))
-    exact = phi is not None and gamma_raw is not None and mu2 is not None and delta is not None
+    have_phi = phi is not None and gamma_raw is not None
+    exact = have_phi and h is not None and len(np.asarray(h)) > 0
+    two_moment = have_phi and mu2 is not None and delta is not None
 
     if exact:
+        phi = np.asarray(phi, dtype=float)
+        eps_a = np.zeros_like(phi) if eps is None else np.asarray(eps, dtype=float)
+        h = np.asarray(h, dtype=float)
+        nu_c = exact_nu_c(phi, eps_a, h, gamma_raw)
+        ov = np.array([exact_overlap(float(v), phi, eps_a, h, gamma_raw, nu_c=nu_c)
+                       for v in nu])
+    elif two_moment:
         phi = np.asarray(phi, dtype=float)
         eps_a = np.zeros_like(phi) if eps is None else np.asarray(eps, dtype=float)
         nu_c = approx_nu_c(phi, eps_a, gamma_raw, mu2, delta)
@@ -538,6 +562,11 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         m2, _, dl = locus_moments(sub)
         mu2s.append(m2)
         deltas.append(dl)
+        if rep == 0:
+            # The exact route needs the whole weight vector. One replicate's is
+            # representative (mu2/delta vary by <1% across replicates) and keeping all of
+            # them would be num_replicates x L floats per cell.
+            h_rep0 = locus_weights(sub)
 
     cos_all = np.array(cos_all)                 # (num_replicates, k)
     mean_cos = cos_all.mean(axis=1)             # subspace similarity per replicate
@@ -560,7 +589,7 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
     else:
         analytical_per_axis, analytical_mean = analytical_cosine(
             nu, gamma, N=n.sum(), phi=n / n.sum(), eps=eps,
-            gamma_raw=gamma_raw, mu2=mu2_med, delta=delta_med)
+            gamma_raw=gamma_raw, mu2=mu2_med, delta=delta_med, h=h_rep0)
 
     return dict(
         median_cos=float(np.median(mean_cos)),
@@ -583,6 +612,7 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         gamma_raw=gamma_raw,
         mu2=mu2_med,
         delta=delta_med,
+        h=h_rep0,
         nu=np.atleast_1d(np.asarray(nu, dtype=float)) if nu is not None else None,
         N=int(n.sum()), K=len(n), k=len(indices),
         num_replicates=num_replicates, seed=seed)

@@ -1,21 +1,22 @@
 #%%
 """
-Three RMT phenomena on a two-population split, at N = 1e3 and L_input = 1e5.
+Three RMT phenomena on a two-population split, at N = 500 and L_input = 2e4.
 
-A  Eigenvalue spreading. The 398 bulk eigenvalues of one spectrum (grey histogram) against
+A  Eigenvalue spreading. The bulk eigenvalues of one spectrum (grey histogram) against
    the Marchenko-Pastur density computed two ways: with the raw SNP count L, and with the
    variance-effective count L_eff = (sum v)^2 / sum v^2, v = p(1-p). Only the L_eff curve
    matches the observed bulk -- the GRM is built from unnormalized genotypes, so each
    column enters with weight v_l and the aspect ratio is N/L_eff, not N/L. The thick black
-   line marks the 398 identical theoretical eigenvalues, which as a density is a single
-   spike.
+   line marks the identical theoretical eigenvalues, which as a density is a single spike.
 
-B  Spiked eigenvalue transition. The gap lambda_1 / lambda_2 against Fst. Below threshold
-   the spike is absorbed in the bulk and the ratio sits near 1; above it the spike detaches
-   and the ratio climbs.
+B  Spiked eigenvalue transition. The gap lambda_1 / lambda_2 against Fst, one spectrum per
+   Fst (no replicates). Below threshold the spike is absorbed in the bulk and the ratio
+   sits near 1; above it the spike detaches and the ratio climbs.
 
-C  Eigenvector inconsistency. |<v1_hat, v1>| against Fst, with PC1 scatters at three Fst
-   values chosen for no / partial / near-perfect recovery.
+C  Eigenvector inconsistency. The measured median |<v1_hat, v1>| against Fst, read from
+   the existing results/analysis/SingleSplitSweeps/vary_N.csv sweep at N = 500 (plotted
+   as-is, not a fitted curve), with PC1 scatters at three Fst values: very small, just
+   above the detection threshold, and very large.
 
 Both B and C mark the two candidate thresholds, Fst_c = 1/(2*phi*(1-phi)*sqrt(N*L)) with
 raw L and with L_eff, so the panels show which one the transition actually respects.
@@ -30,6 +31,7 @@ import pandas as pd
 from matplotlib.transforms import ScaledTranslation
 
 from plotting_style import okabe_ito, setup_plotting_style
+
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "RMTPhenomena")
@@ -104,9 +106,9 @@ def _threshold_lines(ax, meta):
                label=r'$F_{ST}^{\mathrm{critical}}$ ($L_{\mathrm{eff}}$)')
 
 
-def panel_B(ax, sweep, meta):
+def panel_B(ax, gap, meta):
     """Eigenvalue gap against Fst."""
-    ax.plot(sweep.Fst, sweep.gap_median, '-', color=COLOR_MAIN, linewidth=1.5)
+    ax.plot(gap.Fst, gap.gap, '-', color=COLOR_MAIN, linewidth=1.5)
     _threshold_lines(ax, meta)
     ax.set_xscale('log')
     ax.set_xlabel(r'$F_{ST}$')
@@ -118,9 +120,9 @@ def panel_B(ax, sweep, meta):
               frameon=False)
 
 
-def panel_C(ax, sweep, meta):
-    """Cosine similarity against Fst."""
-    ax.plot(sweep.Fst, sweep.cos_median, '-', color=COLOR_MAIN, linewidth=1.5)
+def panel_C(ax, cos_sweep, meta):
+    """Cosine similarity against Fst: the measured median, not a fitted curve."""
+    ax.plot(cos_sweep.Fst, cos_sweep.median_cos, '-', color=COLOR_MAIN, linewidth=1.5)
     _threshold_lines(ax, meta)
     ax.set_xscale('log')
     ax.set_xlabel(r'$F_{ST}$')
@@ -142,8 +144,10 @@ def add_insets(fig, ax_C, pc1):
     fig_w_in, fig_h_in = fig.get_size_inches()
     pos = ax_C.get_position()
 
-    groups = [g for _, g in pc1.groupby('target_cos')]
-    groups.sort(key=lambda g: float(g.Fst.iloc[0]))
+    # Fixed left-to-right order (small, threshold, large Fst) rather than sorted by value,
+    # since the insets are meant to read as a progression across the sweep.
+    order = ['small', 'threshold', 'large']
+    groups = [pc1[pc1.inset == key] for key in order]
 
     inset_w = pos.width / 3 * 0.80
     inset_gap = pos.width * 0.10
@@ -175,7 +179,8 @@ def add_insets(fig, ax_C, pc1):
 
 def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     setup_plotting_style()
-    sweep = pd.read_csv(os.path.join(analysis_dir, "sweep.csv"))
+    gap = pd.read_csv(os.path.join(analysis_dir, "gap.csv"))
+    cos_sweep = pd.read_csv(os.path.join(analysis_dir, "cos_sweep.csv"))
     spectrum = pd.read_csv(os.path.join(analysis_dir, "spectrum.csv"))
     pc1 = pd.read_csv(os.path.join(analysis_dir, "pc1.csv"))
     meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).iloc[0]
@@ -187,8 +192,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     ax_C = fig.add_subplot(gs[0, 2])
 
     panel_A(ax_A, spectrum, meta)
-    panel_B(ax_B, sweep, meta)
-    panel_C(ax_C, sweep, meta)
+    panel_B(ax_B, gap, meta)
+    panel_C(ax_C, cos_sweep, meta)
 
     for ax, letter in zip((ax_A, ax_B, ax_C), "ABC"):
         ax.text(-0.05, 0.95, letter, transform=ax.transAxes + ScaledTranslation(

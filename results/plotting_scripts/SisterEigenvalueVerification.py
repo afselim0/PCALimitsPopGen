@@ -53,10 +53,16 @@ SERIES = [
 ]
 
 
-def _values_str(x, max_shown=4):
+def _fmt(v):
+    """3 significant figures, with whole numbers written out rather than in exponent form."""
+    v = float(f"{float(v):.3g}")
+    return f"{v:.0f}" if v == int(v) else f"{v:.3g}"
+
+
+def _values_str(x, max_shown=10):
     """Unique values as '{v1, v2, ...}', truncated with an ellipsis count if long."""
-    vals = sorted(set(round(float(v), 4) for v in x))
-    shown = ", ".join(f"{v:g}" for v in vals[:max_shown])
+    vals = sorted(set(float(f"{float(v):.3g}") for v in x))
+    shown = ", ".join(_fmt(v) for v in vals[:max_shown])
     return "{" + shown + (", ..." if len(vals) > max_shown else "") + "}"
 
 
@@ -74,7 +80,7 @@ def _series_label(d, varied, fixed_cols):
         if c == varied:
             parts.append(rf"${NAMES[c]}$ = {_values_str(d[c])}")
         elif c in fixed_cols:
-            parts.append(rf"${NAMES[c]}$={d[c].iloc[0]:g}")
+            parts.append(rf"${NAMES[c]}$={_fmt(d[c].iloc[0])}")
         else:
             parts.append(rf"${NAMES[c]}$ = {_values_str(d[c])}")
     return ", ".join(parts)
@@ -99,7 +105,7 @@ def panel(ax, s, x_col, x_label, title, lim, show_legend=True):
     ax.set_ylabel(r'measured $\nu_1$ (median)')
     ax.set_title(title)
     if show_legend:
-        ax.legend(loc='upper left', fontsize=6, frameon=False)
+        ax.legend(loc='lower right', bbox_to_anchor=(1.25, 0), fontsize=6, frameon=False)
 
 
 def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
@@ -115,9 +121,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     lim = [lo, hi]
 
     panel(axes[0], s, "nu_analytical",
-         r'$\nu_1 = \epsilon_0 + \dfrac{2N\phi_1\phi_2}{\phi_1+\phi_2}'
+         r'$\nu_1 = \epsilon_0 + N\tilde{\phi}'
          r'\dfrac{\tau}{\bar\tau} F_{ST}$', 'analytical formula', lim)
-    panel(axes[1], s, "nu_pred", r'approximate $\nu_1 = N H F_{ST}$', 'approximate formula',
+    panel(axes[1], s, "nu_pred", r'approximate $\nu_1 = N \tilde{\phi} F_{ST}$', 'approximate formula',
           lim, show_legend=False)
 
     for ax, letter in zip(axes, "AB"):

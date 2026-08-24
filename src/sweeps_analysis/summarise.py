@@ -48,7 +48,20 @@ VALUE_KEY = "cos2"
 THEORY_KEY = "analytical_cos2"
 
 
-def _theory_closure(cfg, cell_row):
+def _load_h(sweep_dir):
+    """level -> per-locus weights, from the sidecar the runner's aggregate step writes.
+
+    Absent for sweeps run before the sidecar existed; the models then fall back to their
+    two-moment route, which is why this returns an empty dict rather than raising.
+    """
+    path = os.path.join(sweep_dir, "h.npz")
+    if not os.path.exists(path):
+        return {}
+    with np.load(path) as z:
+        return {k: z[k].astype(float) for k in z.files}
+
+
+def _theory_closure(cfg, cell_row, h=None):
     """
     The model's x -> cos^2 for one curve, or None when it cannot be built.
 
@@ -62,7 +75,10 @@ def _theory_closure(cfg, cell_row):
     try:
         ctx = model.prepare_cached(cfg, cell_row) if hasattr(model, "prepare_cached") \
             else model.prepare(cfg, cell_row)
-        return model.theory_overlap(ctx, dict(cell_row), cell_row, cfg, cell_row)
+        measured = dict(cell_row)
+        if h is not None:
+            measured["h"] = h
+        return model.theory_overlap(ctx, dict(cell_row), cell_row, cfg, measured)
     except Exception as exc:
         print(f"    theory closure unavailable ({type(exc).__name__}: {exc})")
         return None
@@ -90,6 +106,7 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
     x_key = get_model(cfg["model"]).X_KEY
     non_monotone = bool(cfg.get("non_monotone", False))
 
+    h_by_level = _load_h(sweep_dir)
     cross_rows, curve_rows, point_rows = [], [], []
     for level in np.sort(df["level"].unique()):
         d = df[df["level"] == level]
@@ -114,7 +131,8 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         # per-cell context it needs (gamma_raw, mu2, delta, nu) is constant down the curve
         # by construction, so the median cell serves.
         cell = cells[cells["level"] == level]
-        fn = (_theory_closure(cfg, cell.iloc[len(cell) // 2].to_dict())
+        fn = (_theory_closure(cfg, cell.iloc[len(cell) // 2].to_dict(),
+                              h=h_by_level.get(f"{level}"))
               if len(cell) else None)
         x_star = (theory_crossing(fn, float(x.min()), float(x.max()), target=target)
                   if fn is not None else np.nan)

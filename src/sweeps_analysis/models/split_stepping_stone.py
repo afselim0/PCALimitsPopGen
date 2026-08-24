@@ -27,6 +27,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 from pc_recovery import analytical_cosine
 from split_stepping_stone_theory import within_B_F_hat
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))  # src/
+from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
+
 SIM_PARAM = "invM"
 X_KEY = "inv_M"
 
@@ -55,14 +59,15 @@ def prepare_cached(cfg, cell_row):
     """
     The summariser's stand-in for prepare().
 
-    prepare() reads simulation columns (Ne_ancestral, m, t_split) that live in the
-    parameter table, not in a cell row, so calling it from the summariser raises. It is
-    not needed there: theory_overlap anchors on the nu_1 and M the runner already
-    recorded per cell, and M is the only piece of ctx it actually reads.
+    prepare() reads simulation columns that live in the parameter table, not in a cell
+    row, so calling it from the summariser raises. axes() records each of them in the
+    cell's extra precisely so this can rebuild ctx from a CSV row -- theory_overlap
+    re-solves within_B_F_hat per M and needs the full set, not just M.
     """
     return {"K": int(cell_row["K"]), "m": float(cell_row["m"]),
             "t_split": float(cell_row.get("t_split", float("nan"))),
-            "Ne_ancestral": float("nan"), "M": float(cell_row["M"])}
+            "Ne_ancestral": float(cell_row.get("Ne_ancestral", float("nan"))),
+            "M": float(cell_row["M"])}
 
 
 def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
@@ -119,21 +124,56 @@ def axes(ctx, design, sim_row, cfg):
                 indices=[0, 1], select_by_overlap=True, eps=None,
                 theory_route="flat", per_replicate=False,
                 extra=dict(K=K, M=ctx["M"], m=ctx["m"], t_split=ctx["t_split"],
+                           Ne_ancestral=ctx["Ne_ancestral"],
                            n_per_deme_B=n_per_deme_B, n_A=n_A, phi=phi,
                            N=int(n_A + N_B_total), nu_1=float(nu[0])))
 
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):
-    """1/M -> predicted cos^2, via the flat form with nu rescaled linearly in 1/M."""
-    nu_ref = float(measured.get("nu_1", np.nan))
-    inv_M_ref = 1.0 / float(ctx["M"])
-    gamma = float(measured["gamma"])
-    N = int(measured["N"])
-    if not np.isfinite(nu_ref) or nu_ref <= 0:
+    """
+    1/M -> predicted cos^2, re-solving the spatial eigenvalue at each M.
+
+    nu comes from within_B_F_hat's sparse phase-type solve, which is what this demography
+    needs -- the equilibrium stepping-stone closed form does not apply to a recent split.
+    It is genuinely nonlinear in 1/M (the split time sets a ceiling on how much spatial
+    structure can accumulate), so the earlier proportional rescaling of a single anchor
+    was not just imprecise but the wrong shape. m is recovered from the swept M at fixed
+    K and Ne_ancestral, and the solve repeated per point.
+
+    The overlap uses the exact route on the per-locus weights h when available. phi covers
+    the panmictic block A plus B's K^2 demes; eps is left at zero, as the flat route
+    assumed.
+    """
+    K = int(ctx["K"])
+    K_demes = K * K
+    Ne_anc, t_split = float(ctx["Ne_ancestral"]), float(ctx["t_split"])
+    n_per_deme_B = int(measured.get("n_per_deme_B", 0))
+    n_A = int(measured.get("n_A", 0))
+    gamma_raw = float(measured["gamma_raw"])
+    if not n_per_deme_B or not n_A or not np.isfinite(Ne_anc) or not np.isfinite(t_split):
         return None
 
+    n = np.concatenate([[n_A], np.full(K_demes, n_per_deme_B)])
+    phi = n / n.sum()
+    eps = np.zeros(len(n))
+
+    h = measured.get("h")
+    use_exact = h is not None and len(np.asarray(h))
+    if use_exact:
+        h = np.asarray(h, dtype=float)
+        nu_c = exact_nu_c(phi, eps, h, gamma_raw)
+    else:
+        mu2, delta = float(measured["mu2"]), float(measured["delta"])
+        if not np.isfinite(mu2) or not np.isfinite(delta):
+            return None
+        nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
+
     def overlap(inv_M):
-        nu = nu_ref * (float(inv_M) / inv_M_ref)
-        _, mean = analytical_cosine(np.atleast_1d(nu), gamma, N=N)
-        return float(mean) ** 2
+        # M = 4 * Ne_ancestral / K^2 * m, inverted for m at this point of the sweep.
+        m = (1.0 / float(inv_M)) * (K * K) / (4.0 * Ne_anc)
+        nu_vals, _ = within_B_F_hat(K, m, t_split, Ne_anc, n_per_deme_B)
+        nu = float(np.mean(nu_vals[:2]))       # the degenerate spatial pair
+        if use_exact:
+            return exact_overlap(nu, phi, eps, h, gamma_raw, nu_c=nu_c)
+        return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
     return overlap

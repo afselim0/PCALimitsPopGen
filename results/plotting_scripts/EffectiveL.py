@@ -49,8 +49,8 @@ def panel_A(ax, fig, summary):
         ax.plot(d.L_requested, d.L_eff, '-', color=CMAP_N(norm(N)), linewidth=1.6,
                 zorder=2)
 
-    ax.set_xlabel(r'$L$  (polymorphic SNPs)')
-    ax.set_ylabel(r'$L_{\mathrm{eff}}$')
+    ax.set_xlabel(r'$L$  (independent SNPs)')
+    ax.set_ylabel(r'$L_{\mathrm{eff}} = \dfrac{(\sum_l \ h_l)^2}{\sum_l \ h_l^2}$')
     ax.set_title(r'$L_{\mathrm{eff}}$ vs $L$')
     ax.legend(loc='upper left', fontsize=9, frameon=False)
 
@@ -67,8 +67,7 @@ def panel_B(ax, summary):
     d = summary[summary.L_requested == L_max].sort_values("N")
 
     ax.plot(d.N, d.L_eff, 'o-', color=CMAP_N(0.35), markersize=4.5, linewidth=1.6)
-    ax.set_xlabel(r'$N$')
-    ax.set_ylabel(r'$L_{\mathrm{eff}}$')
+    ax.set_xlabel(r'$N$ (total number of samples)')
     ax.set_title(rf'$L_{{\mathrm{{eff}}}}$ vs $N$  ($L={L_max:g}$)')
     # Zero-anchored, so the plateau is read against the full scale rather than against a
     # zoomed axis that would exaggerate the remaining decline.
@@ -79,7 +78,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     setup_plotting_style()
     summary = pd.read_csv(os.path.join(analysis_dir, "summary.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2), sharey=True)
     panel_A(axes[0], fig, summary)
     panel_B(axes[1], summary)
 

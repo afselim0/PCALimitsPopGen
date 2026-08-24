@@ -2,22 +2,19 @@
 """
 Data for the three-panel RMT phenomena figure, from the two-population split simulations.
 
-All three panels use N = 2000 samples (1000 per population, phi = 0.5) and every one of the
-L = 2e5 SNP columns in results/simulations/split -- no column subsampling and no replicates.
-Each simulation file is (20000, 200000) bool, block-ordered by population (10000 rows each),
-so a plain row slice ([:1000] and [10000:11000]) reads two contiguous blocks; drawing a
-random L-column subset instead (as earlier versions of this script did) forces ~1e5
-scattered reads per replicate across a 4 GB memory-mapped file and was the actual cost, not
-the eigendecomposition -- at this N a full eigh is fast regardless. With every column kept,
-one pass over the data already is the population, so there is nothing left to replicate.
+N = 500 samples (250 per population, phi = 0.5), L_input = 2e4 SNP columns.
 
-    A  one spectrum at a representative Fst: the bulk eigenvalues, for the histogram
-       and the two Marchenko-Pastur curves (raw L against L_eff; gamma_eff is cross-checked
+    A  one spectrum at a representative Fst: the bulk eigenvalues, for the histogram and
+       the two Marchenko-Pastur curves (raw L against L_eff; gamma_eff is cross-checked
        against threshold_and_overlap.eta_moments, which agrees with N/L_eff exactly at
-       eps = 0).
-    B  the gap lambda_1 / lambda_2 across the Fst sweep.
-    C  the PC1 cosine similarity across the same sweep, plus the PC1 coordinates at three
-       representative Fst values.
+       eps = 0). Computed once -- no replicates.
+    B  the gap lambda_1 / lambda_2 across the Fst sweep, the top two eigenvalues computed
+       once per Fst -- no replicates.
+    C  the PC1 cosine similarity across the same Fst sweep, read directly from the
+       existing results/analysis/SingleSplitSweeps/vary_N.csv at N = 500 (median_cos, the
+       measured median over its own replicates, not a fitted curve) rather than
+       recomputed here. Only the three PC1 scatters are recomputed: one spectrum each at a
+       very small Fst, one just above the detection threshold, and one very large Fst.
 
 The spectra are rescaled by 0.5 (SPECTRUM_SCALE) because compute_sample_covariance
 normalizes by Delta_bar / 2, which places the floor at 2 / (1 + alpha); the RMT statements
@@ -26,8 +23,8 @@ are written for a floor at 1 / (1 + alpha).
 Fst is always the theoretical value from the filename, never re-estimated.
 
 Outputs (results/analysis/RMTPhenomena):
-    sweep.csv       per Fst: gap and cosine similarity, L_raw, L_eff
     spectrum.csv    the panel-A spectrum, with its L_raw / L_eff
+    gap.csv         panel B: per Fst, lambda_1 / lambda_2, L_raw, L_eff
     pc1.csv         PC1 coordinates for the three panel-C scatters
     meta.csv        one row: N, L_input, the two Fst_c, the panel-A Fst
 """
@@ -37,7 +34,6 @@ import sys
 
 import numpy as np
 import pandas as pd
-from scipy.linalg import eigh as scipy_eigh
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,10 +46,10 @@ from threshold_and_overlap import eta_moments
 
 DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "split")
 DEFAULT_NAME = "RMTPhenomena"
+COS_SWEEP_PATH = os.path.join(ANALYSIS_ROOT, "SingleSplitSweeps", "vary_N.csv")
 
-N = 2000
-L_INPUT = None  # keep every column; no subsampling
-NUM_REPLICATES = 1  # one pass, no column subsampling to replicate over
+N = 500
+L_INPUT = int(2e4)
 SEED = 0
 SPECTRUM_SCALE = 0.5
 
@@ -62,10 +58,30 @@ SPECTRUM_SCALE = 0.5
 # bulk and excluding it would bias the histogram's upper edge.
 PANEL_A_INDEX = 70
 
-# Panel C insets: the target cosine similarities to illustrate, from no recovery through
-# partial to essentially perfect. The Fst actually shown is whichever sweep point comes
-# closest to each target, so the choice adapts to the data rather than being hardcoded.
-COS_TARGETS = (0.15, 0.65, 0.99)
+# Panel C insets: very small Fst (deep sub-threshold), just above the detection threshold,
+# and very large Fst -- read off the existing SingleSplitSweeps/vary_N.csv sweep at N=500,
+# not re-derived here.
+INSET_KEY = ("small", "threshold", "large")
+
+
+def subsample_first_L(Z, n, L, rng):
+    """
+    Row-subsample, filter to polymorphic loci, then take the first L of them.
+
+    pc_recovery.subsample's default L draws L columns *before* filtering out the
+    monomorphic ones, scattered at random across the full width -- at N=1000, L=1e5 out
+    of 200000 columns that was ~1e5 non-sequential reads per Fst on a 4 GB memory-mapped
+    file, which dominated runtime (the dense Z@Z.T covariance and its eigh are the real,
+    unavoidable cost at this N and L -- ~95s/Fst -- but the scattered read was worse still).
+    Row-subsetting first is one contiguous-ish read (Z[idx, :], all columns, few rows);
+    the polymorphic filter and the first-L column slice are both then in-memory and cheap.
+    Deterministic in which L columns are kept (not random), which is fine here since L is
+    a subsample-size choice, not a quantity the theory is sensitive to the identity of.
+    """
+    sub_all = subsample(Z, n, L=None, rng=rng)  # rows only, already polymorphic-filtered
+    if L is not None and L < sub_all.shape[1]:
+        return sub_all[:, :L]
+    return sub_all
 
 
 def spectrum(Z):
@@ -79,48 +95,54 @@ def top2_spectrum(Z):
     """
     The two largest eigenvalues/vectors of the rescaled sample GRM, descending.
 
-    A full eigh at N=1e4 takes ~26 minutes (LAPACK's dense O(N^3) solver has no way to
-    skip the rest of the spectrum); scipy.linalg.eigh's subset_by_index asks LAPACK for
-    only the top two, which panels B/C need (lambda_1/lambda_2 and PC1's cosine
-    similarity) and is the only way 100 Fst x 20 replicates finishes in bounded time.
+    Just spectrum() sliced to the top two: at N=1000, scipy.linalg.eigh's subset_by_index
+    (LAPACK partial solver) measured no faster than a full eigh (~65s either way), so there
+    is nothing to gain from the partial route here -- the Z@Z.T covariance build (~30s) and
+    the O(N^3) eigh (~65s) are both real, unavoidable cost at this N and L=1e5.
     """
-    G = compute_sample_covariance(np.asarray(Z, dtype=np.float64)) * SPECTRUM_SCALE
-    n = G.shape[0]
-    vals, vecs = scipy_eigh(G, subset_by_index=[n - 2, n - 1])
-    return vals[::-1], vecs[:, ::-1]
+    vals, vecs = spectrum(Z)
+    return vals[:2], vecs[:, :2]
+
+
+def _pick_inset_rows(cos_sweep):
+    """
+    The three Fst rows for panel C's insets: very small, just above threshold, very large.
+
+    "Just above threshold" is the first row where nu_axis0 > sqrt(gamma), the BBP
+    detectability condition -- not where analytical_cos turns positive, which is never
+    exactly zero in this sweep (analytical_cosine floors its prediction at the finite-N
+    random-overlap value sqrt(2/(pi*N)) rather than 0, so that test fires on the very first
+    row and collapses "small" and "threshold" onto the same point).
+    """
+    d = cos_sweep.sort_values("Fst").reset_index(drop=True)
+    above = d.index[d.nu_axis0 > np.sqrt(d.gamma)]
+    j_thresh = int(above[0]) if len(above) else len(d) // 2
+    return {"small": d.iloc[0], "threshold": d.iloc[j_thresh], "large": d.iloc[-1]}
 
 
 def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, n_total=N, L=L_INPUT,
-        num_replicates=NUM_REPLICATES, seed=SEED, verbose=True):
+        cos_sweep_path=COS_SWEEP_PATH, seed=SEED, verbose=True):
     """Compute everything the figure needs and write the four tables."""
     params, arrays = load_simulations(simdir)
     n = [n_total // 2, n_total - n_total // 2]
     outdir = os.path.join(ANALYSIS_ROOT, name)
 
-    # ---- panels B and C: sweep over Fst. L=None (every column kept) makes subsample() a
-    # plain contiguous row slice per population rather than a scattered column read, and
-    # with no column subsampling there is nothing to replicate over -- one pass per Fst.
-    rows = []
+    # ---- panel B: gap lambda_1 / lambda_2 across the Fst sweep, one pass per Fst.
+    gap_rows = []
     for i, (_, prow) in enumerate(tqdm(list(params.iterrows()), total=len(params),
-                                       disable=not verbose, desc="Fst sweep")):
+                                       disable=not verbose, desc="Fst sweep (panel B)")):
         Fst = float(prow["Fst"])
-        V, _ = theoretical_eigenvectors(split_T(Fst), n, indices=[0])
-        v1 = V[:, 0]
-
         rng = np.random.default_rng([seed, i])
-        sub = subsample(arrays[i], n, L, rng)
-        vals, vecs = top2_spectrum(sub)
+        sub = subsample_first_L(arrays[i], n, L, rng)
+        vals, _ = top2_spectrum(sub)
+        gap_rows.append(dict(Fst=Fst, simID=prow["simID"],
+                             gap=float(vals[0] / vals[1]),
+                             L_raw=float(sub.shape[1]), L_eff=float(effective_L(sub))))
+    gap = pd.DataFrame(gap_rows).sort_values("Fst").reset_index(drop=True)
 
-        rows.append(dict(Fst=Fst, simID=prow["simID"],
-                         gap_median=float(vals[0] / vals[1]),
-                         cos_median=abs(float(vecs[:, 0] @ v1)),
-                         L_raw=float(sub.shape[1]),
-                         L_eff=float(effective_L(sub))))
-    sweep = pd.DataFrame(rows).sort_values("Fst").reset_index(drop=True)
-
-    # ---- panel A: one spectrum, with the bulk isolated.
-    rng = np.random.default_rng([seed, PANEL_A_INDEX, 0])
-    sub_A = subsample(arrays[PANEL_A_INDEX], n, L, rng)
+    # ---- panel A: one spectrum, with the bulk isolated. Computed once.
+    rng = np.random.default_rng([seed, PANEL_A_INDEX])
+    sub_A = subsample_first_L(arrays[PANEL_A_INDEX], n, L, rng)
     vals_A, _ = spectrum(sub_A)
     # Drop the spike and the exact zero from mean-centering: neither is an MP draw.
     bulk_A = vals_A[1:-1]
@@ -141,28 +163,36 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, n_total=N, L=L_INPUT,
     panelA_gamma_raw = n_total / sub_A.shape[1]
     panelA_gamma_eff = panelA_gamma_raw * mu2_A
 
-    # ---- panel C insets: the sweep points closest to each target cosine similarity.
+    # ---- panel C: cosine similarity read from the existing SingleSplitSweeps sweep at
+    # N = 1000, phi = 0.5 -- not recomputed here.
+    cos_full = pd.read_csv(cos_sweep_path)
+    cos_sweep = cos_full[cos_full.N == n_total].sort_values("Fst").reset_index(drop=True)
+    if cos_sweep.empty:
+        raise ValueError(f"{cos_sweep_path} has no rows with N == {n_total}")
+
+    # ---- panel C insets: PC1 at very small / just-above-threshold / very large Fst.
+    inset_rows = _pick_inset_rows(cos_sweep)
     pc_rows = []
-    for target in COS_TARGETS:
-        j = int(np.argmin(np.abs(sweep.cos_median.values - target)))
-        Fst = float(sweep.Fst.iloc[j])
-        i = int(params.index[params.simID == sweep.simID.iloc[j]][0])
-        rng = np.random.default_rng([seed, i, 0])
-        sub = subsample(arrays[i], n, L, rng)
+    for key in INSET_KEY:
+        row = inset_rows[key]
+        Fst = float(row.Fst)
+        i = int(params.index[np.isclose(params.Fst.values, Fst, rtol=1e-9)][0])
+        rng = np.random.default_rng([seed, i])
+        sub = subsample_first_L(arrays[i], n, L, rng)
         V, _ = theoretical_eigenvectors(split_T(Fst), n, indices=[0])
         vals, vecs = top2_spectrum(sub)
         pc1 = vecs[:, 0]
         pc1 = pc1 if pc1 @ V[:, 0] >= 0 else -pc1        # fix the arbitrary sign
         pc_rows.append(pd.DataFrame(dict(
-            target_cos=target, Fst=Fst, cos_median=float(sweep.cos_median.iloc[j]),
+            inset=key, Fst=Fst, cos_median=float(row.median_cos),
             population=np.repeat([0, 1], n), pc1=pc1)))
     pc1_df = pd.concat(pc_rows, ignore_index=True)
 
-    # ---- metadata: the two critical Fst, from the median L_raw and L_eff of the sweep.
-    L_raw_med = float(sweep.L_raw.median())
-    L_eff_med = float(sweep.L_eff.median())
+    # ---- metadata: the two critical Fst, from the median L_raw and L_eff of panel B's sweep.
+    L_raw_med = float(gap.L_raw.median())
+    L_eff_med = float(gap.L_eff.median())
     meta = pd.DataFrame([dict(
-        N=n_total, L_input=L, num_replicates=num_replicates, seed=seed,
+        N=n_total, L_input=L, seed=seed,
         L_raw=L_raw_med, L_eff=L_eff_med,
         gamma_raw=n_total / L_raw_med, gamma_eff=n_total / L_eff_med,
         Fst_c_raw=2.0 / np.sqrt(n_total * L_raw_med),
@@ -174,23 +204,23 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, n_total=N, L=L_INPUT,
         panelA_gamma_eff=panelA_gamma_eff)])
 
     os.makedirs(outdir, exist_ok=True)
-    sweep.to_csv(os.path.join(outdir, "sweep.csv"), index=False)
+    gap.to_csv(os.path.join(outdir, "gap.csv"), index=False)
     spectrum_df.to_csv(os.path.join(outdir, "spectrum.csv"), index=False)
     pc1_df.to_csv(os.path.join(outdir, "pc1.csv"), index=False)
     meta.to_csv(os.path.join(outdir, "meta.csv"), index=False)
+    cos_sweep.to_csv(os.path.join(outdir, "cos_sweep.csv"), index=False)
 
     if verbose:
         m = meta.iloc[0]
-        L_input_str = f"{L:g}" if L is not None else "all"
-        print(f"\nN={n_total}  L_input={L_input_str}  L_raw={m.L_raw:.0f}  L_eff={m.L_eff:.0f}")
+        print(f"\nN={n_total}  L_input={L:g}  L_raw={m.L_raw:.0f}  L_eff={m.L_eff:.0f}")
         print(f"Fst_c: raw L = {m.Fst_c_raw:.4e},  L_eff = {m.Fst_c_eff:.4e}")
         print(f"panel A: Fst={m.panelA_Fst:.4e}, {len(bulk_A)} bulk eigenvalues, "
               f"support [{bulk_A.min():.4f}, {bulk_A.max():.4f}]")
         print("panel C insets: " + ", ".join(
-            f"Fst={g.Fst.iloc[0]:.3e} (cos={g.cos_median.iloc[0]:.2f})"
-            for _, g in pc1_df.groupby("target_cos")))
+            f"{key}: Fst={g.Fst.iloc[0]:.3e} (cos={g.cos_median.iloc[0]:.2f})"
+            for key, g in pc1_df.groupby("inset", sort=False)))
         print(f"-> {outdir}")
-    return sweep, spectrum_df, pc1_df, meta
+    return gap, spectrum_df, pc1_df, meta, cos_sweep
 
 
 def main():
@@ -200,11 +230,11 @@ def main():
     p.add_argument("--name", default=DEFAULT_NAME)
     p.add_argument("--N", type=int, default=N)
     p.add_argument("--L", type=int, default=L_INPUT)
-    p.add_argument("--num-replicates", type=int, default=NUM_REPLICATES)
+    p.add_argument("--cos-sweep-path", default=COS_SWEEP_PATH)
     p.add_argument("--seed", type=int, default=SEED)
     args = p.parse_args()
     run(simdir=args.simdir, name=args.name, n_total=args.N, L=args.L,
-        num_replicates=args.num_replicates, seed=args.seed)
+        cos_sweep_path=args.cos_sweep_path, seed=args.seed)
 
 
 if __name__ == "__main__":

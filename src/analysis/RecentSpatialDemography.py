@@ -3,11 +3,14 @@
 Recent-split demography (panmictic A + a K x K grid B) and its spatial PC pair, at three
 representative migration rates. Figure 12 in CLAUDE.md.
 
-For each of three m (no / intermediate / strong spatial structure, chosen by the
-theoretical nu of the leading spatial pair relative to sqrt(gamma)), the sample PC pair
-best matching the theoretical (1,0)/(0,1) spatial axis (by overlap -- see
-RecentSpatialOverlapVsM, which established this axis is not reliably the leading PC of
-the full A+B system) is recovered from a genotype matrix subsampled to N_total split
+For each of three m (weak / intermediate / strong spatial structure: the smallest and
+largest M in the grid for the extremes, plus the row of median theoretical nu of the
+leading spatial pair in between), the leading three sample eigenvectors PC1, PC2 and
+PC3 are taken by eigenvalue rank -- literally, not located by overlap with the
+theoretical spatial axis: PC1 is the A/B split and PC2/PC3 carry the grid's spatial
+pair, and the figure shows all three as they fall out of the spectrum. Their overlap
+with the theoretical (1,0)/(0,1) spatial pair is still reported in meta.csv as a
+diagnostic. They are computed from a genotype matrix subsampled to N_total split
 phi/(1-phi) between B (evenly over K^2 demes) and A, per CLAUDE.md's phi convention
 (B's total share of N) -- not the simulation's raw full sample sizes, which only
 coincidentally give a clean phi (the previous version plotted those directly, so
@@ -17,8 +20,14 @@ share). Each B sample is labeled by its deme's grid position for the plotting sc
 color by.
 
 Outputs (results/analysis/RecentSpatialDemography):
-    pc.csv     one row per sample: m_label, m, deme_row, deme_col (NaN for A), pc2, pc3
-    meta.csv   one row per m_label: m, M, nu_1 (theoretical leading spatial eigenvalue)
+    pc.csv     one row per sample: m_label, m, deme_row, deme_col (NaN for A),
+               pc1, pc2, pc3 -- the literal leading three sample eigenvectors by
+               eigenvalue rank, not axes located by overlap
+    meta.csv   one row per m_label: m, M, nu_1 (theoretical leading spatial eigenvalue),
+               t_split (split time in generations, used by the schematic panel),
+               cos (mean principal cosine between the PC2/PC3 pair and the
+               theoretical spatial pair -- the same subspace-overlap convention the
+               RecentSpatialOverlapVsM sweep reports)
 """
 import argparse
 import os
@@ -28,14 +37,16 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
-from pc_recovery import load_simulations, eigenvectors_by_overlap, subsample, SIMULATION_ROOT
+from pc_recovery import (load_simulations, principal_cosines, sample_eigenvectors,
+                         subsample, SIMULATION_ROOT)
 from split_stepping_stone_theory import within_B_F_hat
 from sweeps import ANALYSIS_ROOT
 
 DEFAULT_NAME = "RecentSpatialDemography"
 M_LABELS = ("weak", "intermediate", "strong")
 DEFAULT_PHI = 0.5          # B's total share of N (CLAUDE.md's convention, matches figure 13)
-DEFAULT_N_TOTAL = 10000
+DEFAULT_N_TOTAL = 500
+DEFAULT_L = 10000        # ~11.6k loci still segregate at N=500; 20k were simulated
 
 
 def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
@@ -48,13 +59,13 @@ def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
 
 
 def pick_m_rows(params, nu_1_per_row):
-    """Weak/intermediate/strong: the rows with the largest, median, and smallest
-    theoretical nu_1 (migration ~ inversely related to how well-separated the spatial
-    axis is -- weak migration keeps demes distinct, so nu_1 is largest there)."""
+    """Weak/intermediate/strong: the smallest and largest M in the grid for the two
+    extremes, and the row with the median theoretical nu_1 in between (nu_1 is largest
+    at weak migration, which keeps demes distinct)."""
     order = np.argsort(nu_1_per_row)[::-1]  # descending nu_1 == weak -> strong migration
-    n = len(order)
-    return {"weak": int(order[0]), "intermediate": int(order[n // 2]),
-           "strong": int(order[-1])}
+    M = params.M.to_numpy()
+    return {"weak": int(np.argmin(M)), "intermediate": int(order[len(order) // 2]),
+           "strong": int(np.argmax(M))}
 
 
 def sample_design(phi, N_total, K_demes, n_per_pop_A_avail, n_per_deme_B_avail):
@@ -78,7 +89,7 @@ def sample_design(phi, N_total, K_demes, n_per_pop_A_avail, n_per_deme_B_avail):
 
 
 def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
-        N_total=DEFAULT_N_TOTAL, seed=0, name=DEFAULT_NAME, verbose=True):
+        N_total=DEFAULT_N_TOTAL, L=DEFAULT_L, seed=0, name=DEFAULT_NAME, verbose=True):
     simulation_root = simdir or os.path.join(SIMULATION_ROOT, "split_stepping_stone")
     if os.path.isdir(simulation_root) and any(
             d.startswith("K") for d in os.listdir(simulation_root)):
@@ -111,16 +122,18 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
         M = 4.0 * (Ne_ancestral / K_demes) * m
         V_theory, nu = spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A)
         meta_rows.append(dict(label=label, m=m, M=M, nu_1=float(nu[0]),
-                              simID=params.simID.iloc[i]))
-        if verbose:
-            print(f"{label}: m={m:.4e}, M={M:.3f}, nu_1={nu[0]:.4f}")
-
+                              t_split=t_split, simID=params.simID.iloc[i]))
         rng = np.random.default_rng([seed, i])
         n = np.concatenate([[n_A], np.full(K_demes, n_per_deme_B)])
         n_available = np.concatenate(
             [[int(params.n_per_pop_A.iloc[i])], np.full(K_demes, int(params.n_per_deme_B.iloc[i]))])
-        sub = subsample(arrays[i], n, None, rng, n_available=n_available)
-        pc = eigenvectors_by_overlap(sub, V_theory)
+        sub = subsample(arrays[i], n, L, rng, n_available=n_available,
+                        L_polymorphic=True)
+        pc = sample_eigenvectors(sub, [0, 1, 2])   # literal PC1, PC2, PC3 by eigenvalue
+        cos = float(principal_cosines(V_theory, pc[:, 1:]).mean())
+        meta_rows[-1]["cos"] = cos
+        if verbose:
+            print(f"{label}: m={m:.4e}, M={M:.3f}, nu_1={nu[0]:.4f}, overlap={cos:.3f}")
 
         deme_row = np.concatenate([[np.nan] * n_A,
                                    np.repeat(np.repeat(np.arange(K), K), n_per_deme_B)])
@@ -128,7 +141,7 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
                                    np.repeat(np.tile(np.arange(K), K), n_per_deme_B)])
         pc_rows.append(pd.DataFrame(dict(
             label=label, m=m, deme_row=deme_row, deme_col=deme_col,
-            pc2=pc[:, 0], pc3=pc[:, 1])))
+            pc1=pc[:, 0], pc2=pc[:, 1], pc3=pc[:, 2])))
 
     pc_df = pd.concat(pc_rows, ignore_index=True)
     meta = pd.DataFrame(meta_rows)
@@ -146,11 +159,13 @@ def main():
     p.add_argument("--phi", type=float, default=DEFAULT_PHI,
                    help="B's total share of N (default: %(default)s)")
     p.add_argument("--N-total", type=int, default=DEFAULT_N_TOTAL, dest="N_total")
+    p.add_argument("--L", type=int, default=DEFAULT_L,
+                   help="SNPs per panel, drawn from the polymorphic columns")
     p.add_argument("--name", default=DEFAULT_NAME)
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
-    run(simdir=args.simdir, phi=args.phi, N_total=args.N_total, name=args.name,
-        seed=args.seed)
+    run(simdir=args.simdir, phi=args.phi, N_total=args.N_total, L=args.L,
+        name=args.name, seed=args.seed)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,15 @@
-# OOA3 sister pair: PC3 alignment vs Fst, varying the sisters' balance at fixed N.
-# Matches src/analysis/SisterPCAlignment.py's vary_phi sweep.
+# OOA3 sister pair: PC3 alignment vs Fst, varying the sisters' sampling fractions at fixed N.
 #
-# Every cell spends exactly the same 200 samples on the sister pair, but H (the harmonic
-# mean of their sampling fractions) depends on their balance: (5,195) gives H = 0.0097 and
-# (100,100) gives H = 0.100, a factor of ten. A harmonic mean is dominated by its smaller
-# argument, so the 195 extra samples in the first design buy essentially nothing -- which
-# is the substantive point of the sweep. The curve level is H, not the pair.
+# The total sample size is held at N. A cell takes phi_1 and phi_2 from the list below and
+# assigns N*phi_1 to YRI1, N*phi_2 to YRI2, and N*(1-(phi_1+phi_2))/2 to each of CEU and
+# CHB. Every unordered pair is run, phi_1 = phi_2 included, but not the symmetric
+# duplicates: (a, b) and (b, a) are the same design up to relabelling the sisters, so 4
+# values give 10 cells.
+#
+# The curve level is H, the harmonic mean of phi_1 and phi_2. A harmonic mean is dominated
+# by its smaller argument, so a lopsided pair such as (0.05, 0.20) sits far closer to
+# (0.05, 0.05) than to (0.20, 0.20) -- the extra samples in the larger sister buy little,
+# which is the substantive point of the sweep.
 model: african_split
 name: african_split_vary_harmonic_phi
 simdir: results/simulations/african_split
@@ -20,18 +24,8 @@ fixed:
 sampling:
   fixed: {N: 1000}
   vary:
-    param: sister_split
-    values:
-      - [5, 195]
-      - [10, 190]
-      - [15, 185]
-      - [20, 180]
-      - [30, 170]
-      - [40, 160]
-      - [50, 150]
-      - [70, 130]
-      - [85, 115]
-      - [100, 100]
+    param: phi_sister_pair
+    values: [0.05, 0.10, 0.15, 0.20]
 
 cluster:
   job_name: sw_ooa3_phi

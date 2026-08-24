@@ -23,12 +23,13 @@ Policies (see models/__init__.py for why these are explicit rather than defaulte
 """
 import os
 import sys
+from itertools import combinations_with_replacement
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "analysis"))  # src/analysis/
-from exact_sister_nu import exact_sister_nu, pop_coal_times
+from exact_sister_nu import analytical_nu, exact_sister_nu, pop_coal_times
 from pc_recovery import subsample
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
@@ -84,12 +85,18 @@ def design_N(N, phi):
     return n
 
 
-def design_phi(n1, n2, N):
-    """n = [n_other, n_other, n1, n2], the other two populations splitting the remainder."""
+def design_phi(phi1, phi2, N):
+    """
+    n = [n_other, n_other, N*phi1, N*phi2], CEU and CHB splitting the remainder.
+
+    The sisters take their own fractions of the fixed total, so each cell spends a
+    different number of samples on the pair; CEU and CHB absorb N*(1-(phi1+phi2))/2 each.
+    """
+    n1, n2 = int(round(phi1 * N)), int(round(phi2 * N))
     n_o = (N - n1 - n2) // 2
     n = np.array([n_o, n_o, 0, 0], dtype=int)
     n[SISTER[0]], n[SISTER[1]] = n1, n2
-    n[0] += N - n.sum()
+    n[0] += N - n.sum()          # absorb the rounding residual
     return n
 
 
@@ -140,20 +147,22 @@ def designs(cfg):
             out.append((int(N), n))
         return out
 
-    if param == "sister_split":
+    if param == "phi_sister_pair":
         N = int(fixed["N"])
         out = []
-        for pair in values:
-            n1, n2 = int(pair[0]), int(pair[1])
-            n = design_phi(n1, n2, N)
-            _check_feasible(n, f"n1_{n1}")
-            # The level is the harmonic mean H, which is what the figure's colourbar keys
-            # on -- the (n1, n2) pair is only how it is realised.
+        # Every unordered pair drawn from the list, phi_1 = phi_2 included: (a, b) and
+        # (b, a) give the same H and the same design up to relabelling the sisters, so
+        # only one of each is run.
+        for phi1, phi2 in combinations_with_replacement([float(v) for v in values], 2):
+            n = design_phi(phi1, phi2, N)
+            _check_feasible(n, f"phi_{phi1}_{phi2}")
+            # The level is the harmonic mean H, which is what the figure keys on -- the
+            # (phi1, phi2) pair is only how it is realised.
             out.append((harmonic_phi(n), n))
         return out
 
     raise ValueError(f"african_split: cannot vary {param!r}; expected 'N' or "
-                     f"'sister_split'")
+                     f"'phi_sister_pair'")
 
 
 def axes(ctx, design, sim_row, cfg):
@@ -183,13 +192,22 @@ def axes(ctx, design, sim_row, cfg):
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):
     """
-    Fst -> predicted cos^2.
+    Fst -> predicted cos^2, computed rather than fitted or rescaled.
 
-    nu is very nearly linear in Fst at fixed design, so the closure scales the exact nu
-    recorded for this cell. The additive pedestal matters -- nu does not pass through the
-    origin, and dropping the intercept is what makes the nu = N*H*Fst approximation
-    understate the eigenvalue -- so the closure keeps the exact nu as the anchor rather
-    than rebuilding it from N*H*Fst.
+    nu is evaluated exactly at each Fst from the coalescent-time matrix,
+
+        nu(Fst) = eps_0 + (tau/tau_bar) * N * H * Fst
+
+    (exact_sister_nu.analytical_nu). The additive pedestal eps_0 is a constant of the
+    demography, so the earlier approach -- rescaling one anchor cell's nu proportionally,
+    nu_ref * Fst/Fst_ref -- multiplied eps_0 by Fst/Fst_ref instead of holding it fixed.
+    That over-fed nu above the anchor and made the predicted crossing too early, by up to
+    a factor of two at small N where eps_0 is the larger share of nu.
+
+    The overlap then goes through the exact route (exact_nu_c/exact_overlap) on the true
+    K = 4 phi and eps, with the per-locus weights h when the sidecar supplies them. phi
+    here is the full sampling-proportion vector, NOT the harmonic mean H, which is only
+    the curve label.
     """
     # design is the recorded cell row when called from the summariser (see split.py).
     if isinstance(design, dict):
@@ -202,15 +220,23 @@ def theory_overlap(ctx, design, sim_row, cfg, measured):
     tau = np.diag(ctx["T"])
     eps = tau / float(np.sum(phi * tau)) - 1.0
 
-    nu_ref = float(measured["nu"])
-    fst_ref = float(sim_row[SIM_PARAM])
     gamma_raw = float(measured["gamma_raw"])
+    T = ctx["T"]
+    h = measured.get("h")
+
+    if h is not None and len(np.asarray(h)):
+        h = np.asarray(h, dtype=float)
+        nu_c = exact_nu_c(phi, eps, h, gamma_raw)
+
+        def overlap(fst):
+            return exact_overlap(analytical_nu(T, n, float(fst)), phi, eps, h,
+                                 gamma_raw, nu_c=nu_c)
+        return overlap
+
     mu2, delta = float(measured["mu2"]), float(measured["delta"])
-    if not np.isfinite(nu_ref) or fst_ref <= 0:
-        return None
     nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
 
     def overlap(fst):
-        nu = nu_ref * (float(fst) / fst_ref)
-        return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
+        return approx_overlap(analytical_nu(T, n, float(fst)), phi, eps,
+                              gamma_raw, mu2, delta, nu_c=nu_c)
     return overlap

@@ -3,11 +3,13 @@
 PC alignment with the recently-split sister axis (YRI1/YRI2), as a detection threshold in Fst.
 
 A  squared overlap vs Fst at nine sample sizes N, each sister held at 20% of N (H = 0.20).
-B  squared overlap vs Fst at ten sister balances, N = 1000 with the pair supplying 200
-   samples between them -- so every level spends the same sequencing effort on the sisters
-   and only their *balance* differs. H is the harmonic mean of the two sampling fractions,
-   which is dominated by the smaller one: (5,195) gives H = 0.0097 and (100,100) gives
-   H = 0.100, a factor of ten apart on identical effort. That is the point of the panel.
+B  squared overlap vs Fst at ten sister sampling designs, N = 1000 throughout. Each design
+   takes a pair (phi_1, phi_2) from {0.05, 0.10, 0.15, 0.20} -- every unordered pair,
+   phi_1 = phi_2 included -- and gives YRI1 and YRI2 those fractions of N, with CEU and CHB
+   splitting the rest. H is the harmonic mean of the two fractions, which is dominated by
+   the smaller one: (0.05, 0.20) gives H = 0.08, much closer to (0.05, 0.05)'s 0.05 than to
+   (0.20, 0.20)'s 0.20 despite four times the samples in the larger sister. That is the
+   point of the panel.
 
 Panel A holds H at 0.20 rather than 0.05: at 0.05 the exact nu topped out at 1.67 across
 the whole simulated Fst range, so every curve plateaued near squared overlap 0.78 and never
@@ -55,12 +57,13 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         cmap=CMAP_N, cbar_label=r"$N$", target=target)
     res_H = crossing_panel_from_summary(
         axes[1], curves, crossings, points, sweep="african_split_vary_harmonic_phi",
-        cmap=CMAP_H, cbar_label=r"$H$", target=target)
+        cmap=CMAP_H, cbar_label=r"$\tilde{\phi}$", target=target)
 
     for ax in axes:
         ax.set_xlabel(r"$F_{ST}$")
-    axes[0].set_title(r"varying $N$  ($H=0.20$)")
-    axes[1].set_title(r"varying $\phi_1{:}\phi_2$  ($N=1000$, $n_1{+}n_2=200$)")
+        ax.set_ylabel(r"$F_{ST}$")
+    axes[0].set_title(r"varying $N$  ($\tilde{\phi}=0.20$)")
+    axes[1].set_title(r"varying $\phi_1,\phi_2$  ($N=1000$)")
     encoding_legend(axes[0], target=target)
 
     for ax, letter in zip(axes, "AB"):

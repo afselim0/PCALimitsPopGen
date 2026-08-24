@@ -21,8 +21,10 @@ for the detection sweeps, concave for the recent-split ones that turn over -- an
 supplies a Bayesian confidence band directly, so the drawn curve and the reported crossing
 come from the same fit. See src/analysis/scam_fit.py.
 
-The 95% band is scam's own se.fit, not a bootstrap, so a curve costs one fit. The crossing
-CI is read off that band: where its upper and lower edges reach the target.
+The 99% band is scam's own se.fit, not a bootstrap, so a curve costs one fit. The crossing
+CI is read off that band: where its upper and lower edges reach the target. 99% rather than
+95% because these curves are fitted through ~800 replicate points, which makes a 95% band
+about a line-width wide -- see scam_fit.DEFAULT_LEVEL.
 """
 import argparse
 import os

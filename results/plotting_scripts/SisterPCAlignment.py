@@ -48,29 +48,30 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     crossings = pd.read_csv(os.path.join(summary_dir, "crossings.csv"))
     points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.2))
 
     res_N = crossing_panel_from_summary(
         axes[0], curves, crossings, points, sweep="african_split_vary_N",
         cmap=CMAP_N, cbar_label=r"$N$", target=target)
-    # Ten H levels: the legend needs the empty upper-left quadrant, not the right edge
-    # where the curves rise. Two columns keeps it short enough to clear them.
     res_H = crossing_panel_from_summary(
         axes[1], curves, crossings, points, sweep="african_split_vary_harmonic_phi",
-        cmap=CMAP_H, cbar_label=r"$H$", target=target,
-        legend_loc="upper left", legend_ncol=2)
+        cmap=CMAP_H, cbar_label=r"$H$", target=target)
 
     for ax in axes:
         ax.set_xlabel(r"$F_{ST}$")
     axes[0].set_title(r"varying $N$  ($H=0.20$)")
     axes[1].set_title(r"varying $\phi_1{:}\phi_2$  ($N=1000$, $n_1{+}n_2=200$)")
-    encoding_legend(axes[0], target=target, loc="lower right")
+    encoding_legend(axes[0], target=target)
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")
 
+    # tight_layout does not reserve room for a legend anchored outside the axes,
+    # so the inter-panel gap is set explicitly to hold panel A's legend clear of
+    # panel B's y-axis label.
     fig.tight_layout()
+    fig.subplots_adjust(wspace=0.34)
     os.makedirs(figure_dir, exist_ok=True)
     out = os.path.join(figure_dir, "SisterPCAlignment.pdf")
     fig.savefig(out, bbox_inches="tight")

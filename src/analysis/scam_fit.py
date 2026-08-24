@@ -23,7 +23,7 @@ in x" and "monotone in log x" are the same constraint and the knots are evenly s
 across the plotted range.
 
 The band is scam's own `se.fit` from predict(), i.e. the Bayesian credible interval for the
-smooth, scaled to 95% here. That is what makes this route worth the R dependency: no
+smooth, scaled to 99% here -- see DEFAULT_LEVEL for why not 95%. That is what makes this route worth the R dependency: no
 bootstrap is needed for the band, so a curve costs one fit rather than n_boot of them.
 
 The crossing (where the fitted curve first reaches the target) is read off the *same*
@@ -36,6 +36,12 @@ Requires: R with the `scam` package, and rpy2. `available()` reports whether the
 importable so callers can fail with a clear message rather than an rpy2 traceback.
 """
 import numpy as np
+
+# 99%, not the conventional 95%. These curves are fitted through ~800 replicate points, so
+# the posterior SD of the smooth is small and a 95% band comes out around a line-width
+# wide -- present, but not legible as a band. 99% is ~1.31x wider (2.576/1.96) and is still
+# a standard interval rather than an arbitrary inflation.
+DEFAULT_LEVEL = 0.99
 
 _R_CACHE = {}
 
@@ -66,7 +72,7 @@ def _r():
     return _R_CACHE
 
 
-def scam_fit(x, y, shape="mpi", k=10, x_grid=None, n_grid=300, level=0.95,
+def scam_fit(x, y, shape="mpi", k=10, x_grid=None, n_grid=300, level=DEFAULT_LEVEL,
              logit=False):
     """
     Fit a shape-constrained spline of y on log(x) and predict it with a confidence band.
@@ -78,7 +84,10 @@ def scam_fit(x, y, shape="mpi", k=10, x_grid=None, n_grid=300, level=0.95,
         k: spline basis dimension. 10 is scam's default and is ample for these sweeps,
             which have 40-100 distinct x values; the shape constraint, not k, is what
             controls the wiggliness.
-        level: confidence level for the band (0.95).
+        level: confidence level for the band. Defaults to 99% rather than 95%: with
+            ~800 replicate points per curve the posterior SD of the smooth is small, and
+            a 95% band is around a line-width wide -- too thin to read as a band at all.
+            99% is ~1.3x wider and still a standard interval.
         logit: fit on the logit scale so the curve cannot leave (0, 1). Off by default --
             these responses sit well inside the interval and the identity scale keeps the
             band symmetric and the constraint literal.

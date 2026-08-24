@@ -54,17 +54,13 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     crossings = pd.read_csv(os.path.join(summary_dir, "crossings.csv"))
     points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
-    # Both panels' curves fill the upper band, so the per-curve legends go low; the
-    # encoding key is then placed in the opposite corner automatically.
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.2))
     res_n = peak_panel_from_summary(
         axes[0], curves, crossings, points, sweep="split_ss_vary_N",
-        cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target,
-        legend_loc="lower left")
+        cmap=CMAP, cbar_label=r"$n_{B,\mathrm{per\,deme}}$", target=target)
     res_phi = peak_panel_from_summary(
         axes[1], curves, crossings, points, sweep="split_ss_vary_phi",
-        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target,
-        legend_loc="lower left")
+        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
 
     for ax in axes:
         ax.set_xlabel(r"$1/M$")
@@ -76,7 +72,11 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")
 
+    # tight_layout does not reserve room for a legend anchored outside the axes,
+    # so the inter-panel gap is set explicitly to hold panel A's legend clear of
+    # panel B's y-axis label.
     fig.tight_layout()
+    fig.subplots_adjust(wspace=0.34)
     os.makedirs(figure_dir, exist_ok=True)
     out = os.path.join(figure_dir, "RecentSpatialOverlapVsM.pdf")
     fig.savefig(out, bbox_inches="tight")

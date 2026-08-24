@@ -44,7 +44,7 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     crossings = pd.read_csv(os.path.join(summary_dir, "crossings.csv"))
     points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.2))
     results = []
     for ax, (sweep, label) in zip(axes, SWEEPS):
         res = crossing_panel_from_summary(ax, curves, crossings, points, sweep=sweep,
@@ -58,7 +58,11 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")
 
+    # tight_layout does not reserve room for a legend anchored outside the axes,
+    # so the inter-panel gap is set explicitly to hold panel A's legend clear of
+    # panel B's y-axis label.
     fig.tight_layout()
+    fig.subplots_adjust(wspace=0.3)
     os.makedirs(figure_dir, exist_ok=True)
     out = os.path.join(figure_dir, "SteppingStoneOverlapVsM.pdf")
     fig.savefig(out, bbox_inches="tight")

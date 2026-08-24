@@ -37,8 +37,13 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "src", "analysis"))
 from crossing_fit import DEFAULT_TARGET, fit_with_band, theory_crossing
 
-POINT_KW = dict(s=4, alpha=0.16, linewidths=0, zorder=1)
-BAND_KW = dict(alpha=0.25, linewidth=0, zorder=2)
+# The scatter is deliberately faint: it is context for the fit, and at 8 replicates x ~100
+# x-values it will otherwise swamp the band drawn on top of it.
+POINT_KW = dict(s=3, alpha=0.10, linewidths=0, zorder=1)
+# Bands here are genuinely narrow (a typical one is ~0.015 in cos^2, a few points on the
+# page), so they need enough alpha to register against the scatter rather than blending
+# into it.
+BAND_KW = dict(alpha=0.45, linewidth=0, zorder=2)
 FIT_KW = dict(linewidth=1.7, zorder=3)
 # The crossing is marked on the curve itself. A white edge keeps it legible where several
 # curves converge at the right of the panel.
@@ -67,6 +72,24 @@ def level_colors(levels, cmap=None):
     if cmap is not None:
         return [cmap(0.5)]
     return [DISCRETE_COLORS[i % len(DISCRETE_COLORS)] for i in range(len(levels))]
+
+
+def _curve_legend(ax, title, loc=None, ncol=1):
+    """
+    The per-curve key, placed outside the axes to the right by default.
+
+    Outside rather than inside because these panels have no reliably empty corner: the
+    curves sweep from bottom-left to top-right and the crossings sit along the top, so an
+    inset legend covers either the transition or the markers. loc may still be given to
+    force it inside.
+    """
+    if loc is None:
+        return ax.legend(title=title, loc="center left", bbox_to_anchor=(1.02, 0.5),
+                         fontsize=8, title_fontsize=9, frameon=False,
+                         handlelength=1.4, labelspacing=0.3, ncol=ncol,
+                         columnspacing=1.2, borderaxespad=0.0)
+    return ax.legend(title=title, loc=loc, fontsize=8, title_fontsize=9, frameon=False,
+                     handlelength=1.4, labelspacing=0.25, ncol=ncol, columnspacing=1.2)
 
 
 def format_level(v):
@@ -155,7 +178,7 @@ def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TA
 def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                                 cmap=None, cbar_label="", target=DEFAULT_TARGET,
                                 levels=None, show_points=True, show_theory_curve=False,
-                                legend_title=None, legend_loc="lower right",
+                                legend_title=None, legend_loc=None,
                                 legend_ncol=1, show_legend=True, **_ignored):
     """
     Draw one panel from the pre-fitted summary files. Fits nothing.
@@ -233,17 +256,15 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     ax.set_ylim(-0.04, 1.04)
     ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
     if show_legend:
-        ax.legend(title=legend_title if legend_title is not None else cbar_label,
-                  loc=legend_loc, fontsize=8, title_fontsize=9, frameon=False,
-                  handlelength=1.4, labelspacing=0.25, ncol=legend_ncol,
-                  columnspacing=1.2)
+        _curve_legend(ax, legend_title if legend_title is not None else cbar_label,
+                      legend_loc, ncol=legend_ncol)
     return out
 
 
 def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                             cmap=None, cbar_label="", target=DEFAULT_TARGET,
                             levels=None, show_points=True, mark_peak=True,
-                            legend_title=None, legend_loc="lower left",
+                            legend_title=None, legend_loc=None,
                             show_legend=True, **_ignored):
     """
     Draw a non-monotone sweep: the concave scam fit and its peak, with no crossing markers.
@@ -294,9 +315,8 @@ def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     ax.set_ylim(-0.04, 1.04)
     ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
     if show_legend:
-        ax.legend(title=legend_title if legend_title is not None else cbar_label,
-                  loc=legend_loc, fontsize=8, title_fontsize=9, frameon=False,
-                  handlelength=1.4, labelspacing=0.25)
+        _curve_legend(ax, legend_title if legend_title is not None else cbar_label,
+                      legend_loc)
     return out
 
 
@@ -308,8 +328,8 @@ def peak_legend(ax, target=DEFAULT_TARGET, loc="lower left"):
     an existing legend when a new one is set, so the first is re-added as an artist.
     """
     handles = [
-        Line2D([], [], color="0.35", linewidth=1.7, label="concave scam fit"),
-        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="95% band"),
+        Line2D([], [], color="0.35", linewidth=1.7, label="concave spline fit"),
+        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="99% confidence band"),
         Line2D([], [], color="0.35", label="peak overlap", **CROSS_MARKER_KW),
         Line2D([], [], color="0.6", linewidth=0.8, linestyle=":",
                label=rf"$\langle\hat u,u\rangle^2={target:g}$"),
@@ -325,7 +345,7 @@ _OPPOSITE_LOC = {
 }
 
 
-def _add_second_legend(ax, handles, loc):
+def _add_second_legend(ax, handles, loc, force_loc=False):
     """
     Attach the encoding key without discarding or colliding with the per-curve legend.
 
@@ -335,9 +355,12 @@ def _add_second_legend(ax, handles, loc):
     each other.
     """
     existing = ax.get_legend()
-    if existing is not None:
-        # Place the key opposite whatever corner the curve legend claimed.
-        loc = _OPPOSITE_LOC.get(_legend_loc_name(existing), loc)
+    if not force_loc:
+        # Pick whichever corner has the least drawn in it. The curve legend now lives
+        # outside the axes, so the only thing to avoid is the data -- and which corner is
+        # free differs per panel (a saturating sweep fills the top, a slow one the bottom),
+        # so this is measured rather than assumed.
+        loc = _emptiest_corner(ax)
     # A translucent background, unlike the per-curve legend: the key sits wherever the
     # curve legend is not, which on a saturating panel can be right on top of the curves.
     key = ax.legend(handles=handles, loc=loc, fontsize=8, frameon=True,
@@ -347,6 +370,48 @@ def _add_second_legend(ax, handles, loc):
     if existing is not None:
         ax.add_artist(existing)
         ax.add_artist(key)
+
+
+def _emptiest_corner(ax, candidates=("upper left", "lower right", "lower left",
+                                     "upper right")):
+    """
+    The corner quadrant containing the fewest plotted points.
+
+    Counts the scatter and the fitted lines already on the axes, in axes coordinates, and
+    returns the candidate corner with the lowest count. Ties keep the candidate order,
+    which puts the conventional upper-left first.
+    """
+    import numpy as _np
+    xs, ys = [], []
+    for coll in ax.collections:                      # the replicate scatter
+        off = coll.get_offsets()
+        if off is not None and len(off):
+            xs.append(_np.asarray(off[:, 0], float))
+            ys.append(_np.asarray(off[:, 1], float))
+    for ln in ax.lines:                              # the fitted curves
+        if len(ln.get_xdata()) > 2:
+            xs.append(_np.asarray(ln.get_xdata(), float))
+            ys.append(_np.asarray(ln.get_ydata(), float))
+    if not xs:
+        return candidates[0]
+
+    x = _np.concatenate(xs)
+    y = _np.concatenate(ys)
+    ok = _np.isfinite(x) & _np.isfinite(y)
+    if not ok.any():
+        return candidates[0]
+    # Into axes coordinates, so the comparison is about screen position not data units.
+    pts = ax.transAxes.inverted().transform(
+        ax.transData.transform(_np.column_stack([x[ok], y[ok]])))
+    ax_x, ax_y = pts[:, 0], pts[:, 1]
+
+    counts = {}
+    for corner in candidates:
+        vert, horiz = corner.split()
+        in_x = ax_x < 0.42 if horiz == "left" else ax_x > 0.58
+        in_y = ax_y > 0.58 if vert == "upper" else ax_y < 0.42
+        counts[corner] = int((in_x & in_y).sum())
+    return min(candidates, key=lambda c: counts[c])
 
 
 def _legend_loc_name(legend):
@@ -373,17 +438,24 @@ def peak_table(results, level_name, x_name):
     return "peak of the fitted curve\n" + "\n".join(lines)
 
 
-def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left"):
-    """Key for what the marks mean on a crossing panel, beside the per-curve legend."""
+def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False):
+    """
+    Key for what the marks mean on a crossing panel, beside the per-curve legend.
+
+    force_loc keeps `loc` exactly as given instead of auto-placing opposite the curve
+    legend -- needed where the auto choice would land the key on the curves themselves.
+    """
     handles = [
-        Line2D([], [], color="0.35", linewidth=1.7, label="monotone scam fit"),
-        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="95% band"),
+        Line2D([], [], color="0.35", linewidth=1.7, label="monotonic spline fit"),
+        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="99% confidence band"),
         Line2D([], [], color="0.35",
                label=rf"measured $\langle\hat u,u\rangle^2={target:g}$",
                **CROSS_MARKER_KW),
-        Line2D([], [], color="0.35", label="theory", **THEORY_VLINE_KW),
+        Line2D([], [], color="0.35",
+               label=rf"theoretical $\langle\hat u,u\rangle^2={target:g}$",
+               **THEORY_VLINE_KW),
     ]
-    _add_second_legend(ax, handles, loc)
+    _add_second_legend(ax, handles, loc, force_loc=force_loc)
 
 
 def crossing_table(results, level_name, x_name):
@@ -394,7 +466,7 @@ def crossing_table(results, level_name, x_name):
     reached the target as the sweep ended, so the number is a lower bound on the crossing
     rather than a measurement of it.
     """
-    lines = [f"{level_name:>10}  {'measured':>13}  {'95% CI':>26}  {'theory':>12}  ratio"]
+    lines = [f"{level_name:>10}  {'measured':>13}  {'99% CI':>26}  {'theory':>12}  ratio"]
     for r in results:
         ci = (f"[{r['crossing_lo']:.3g}, {r['crossing_hi']:.3g}]"
               if np.isfinite(r["crossing_lo"]) else "-")

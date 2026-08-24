@@ -50,7 +50,7 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     setup_plotting_style()
     curves, crossings, points = load_summary(summary_dir)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.2))
 
     res_N = crossing_panel_from_summary(
         axes[0], curves, crossings, points, sweep="split_vary_N",
@@ -69,7 +69,11 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")
 
+    # tight_layout does not reserve room for a legend anchored outside the axes,
+    # so the inter-panel gap is set explicitly to hold panel A's legend clear of
+    # panel B's y-axis label.
     fig.tight_layout()
+    fig.subplots_adjust(wspace=0.26)
     os.makedirs(figure_dir, exist_ok=True)
     out = os.path.join(figure_dir, "SingleSplitSweeps.pdf")
     fig.savefig(out, bbox_inches="tight")

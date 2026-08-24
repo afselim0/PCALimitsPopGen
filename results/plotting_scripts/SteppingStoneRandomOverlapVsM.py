@@ -62,7 +62,7 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     # so the inter-panel gap is set explicitly to hold panel A's legend clear of
     # panel B's y-axis label.
     fig.tight_layout()
-    fig.subplots_adjust(wspace=0.42)
+    fig.subplots_adjust(wspace=0.62)
     os.makedirs(figure_dir, exist_ok=True)
     out = os.path.join(figure_dir, "SteppingStoneRandomOverlapVsM.pdf")
     fig.savefig(out, bbox_inches="tight")

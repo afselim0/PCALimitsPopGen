@@ -61,6 +61,7 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
     os.makedirs(partial_dir, exist_ok=True)
     rep_path = os.path.join(partial_dir, f"sim{index}.csv")
     cell_path = os.path.join(partial_dir, f"sim{index}_cells.csv")
+    h_path = os.path.join(partial_dir, f"sim{index}_h.npz")
     if os.path.exists(rep_path) and os.path.exists(cell_path) and not force:
         if verbose:
             print(f"  sim{index}: already done, skipping")
@@ -75,7 +76,7 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
     ctx = model.prepare(cfg, sim_row)
 
     x_value = float(sim_row[model.SIM_PARAM])
-    cell_rows, rep_rows = [], []
+    cell_rows, rep_rows, h_by_cell = [], [], {}
     for level, design in sampling_grid(cfg):
         spec = model.axes(ctx, design, sim_row, cfg)
         if spec is None:
@@ -114,7 +115,16 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
         for key in ("n_demes_sampled",):
             if key in res:
                 row[key] = res[key]
+        # nu likewise, but reduced the same way spec's is: a per-replicate model computes
+        # the real nu only after drawing its demes, and may hand back the whole array.
+        if res.get("nu") is not None:
+            row["nu"] = float(np.mean(np.atleast_1d(res["nu"])))
         cell_rows.append(row)
+        # The per-locus weights the exact threshold/overlap route needs. Too wide for a
+        # CSV column, so they travel in a sidecar keyed by level, which the summariser
+        # loads alongside cells.csv.
+        if res.get("h") is not None:
+            h_by_cell[f"{level}"] = np.asarray(res["h"], dtype=np.float32)
 
         # replicate_rows re-adds the x column per row, so it must not also sit in base.
         base = {k: v for k, v in row.items() if k not in ("x", model.X_KEY)}
@@ -125,6 +135,8 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
 
     pd.DataFrame(cell_rows).to_csv(cell_path, index=False)
     pd.DataFrame(rep_rows).to_csv(rep_path, index=False)
+    if h_by_cell:
+        np.savez_compressed(h_path, **h_by_cell)
     if verbose:
         print(f"  sim{index} ({sim_row['simID']}): {len(cell_rows)} cells, "
               f"{len(rep_rows)} replicate rows -> {rep_path}", flush=True)
@@ -157,3 +169,18 @@ def aggregate(cfg, outdir, n_simulations=None, verbose=True):
         df.to_csv(out, index=False)
         if verbose:
             print(f"wrote {len(df)} rows -> {out}")
+
+    # One representative per-locus weight vector per curve, for the summariser's exact
+    # theory route. The summariser anchors each curve on its median cell, so the sidecar
+    # of the corresponding simulation is the one that matches.
+    h_paths = [os.path.join(partial_dir, f"sim{i}_h.npz") for i in range(n)]
+    h_paths = [p for p in h_paths if os.path.exists(p)]
+    if h_paths:
+        merged = {}
+        with np.load(h_paths[len(h_paths) // 2]) as z:
+            for k in z.files:
+                merged[k] = z[k]
+        h_out = os.path.join(outdir, "h.npz")
+        np.savez_compressed(h_out, **merged)
+        if verbose:
+            print(f"wrote {len(merged)} weight vectors -> {h_out}")

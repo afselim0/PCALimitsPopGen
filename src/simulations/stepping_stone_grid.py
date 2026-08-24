@@ -22,11 +22,13 @@ stone.
 """
 import os
 import sys
+from functools import lru_cache
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from threshold_and_overlap import spectrum_psi
+from utils import compute_F_hat
 
 
 def laplacian_eigenvalues(K, dimension=1):
@@ -139,6 +141,69 @@ def closed_form_spectrum(K, M, n_per_deme, dimension=1):
     order = np.argsort(nu)[::-1]
     modes = [modes[i] for i in order]
     return modes, nu[order], V[:, order]
+
+
+@lru_cache(maxsize=None)
+def _lattice_T(K, dimension, Ne, M_ref):
+    """Full-lattice T at a reference M, cached: the 2D pseudo-inverse costs ~1.8 s and
+    depends only on the lattice, not on M or phi."""
+    # Imported here, not at module scope: stepping_stone_detection imports from this
+    # module, so a top-level import would be circular.
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "analysis"))
+    from stepping_stone_detection import stepping_stone_T
+    return stepping_stone_T(K, M_ref / (4.0 * Ne), Ne, dimension)
+
+
+def subsampled_structure_eigenvalues(K, M, n_per_deme, phi, dimension=1,
+                                     n_schemes=16, Ne=100.0, seed=0):
+    """
+    The leading structure eigenvalue(s) when only a fraction phi of demes is sampled.
+
+    nu_k = N / (M K_demes mu_k) is the EVEN-sampling result: it presumes every deme
+    carries samples, so it is only valid at phi = 1. Sampling a subset changes F_hat --
+    both the phi_a weights and which rows of the resistance distance survive -- and the
+    leading eigenvalue drops well below the closed form.
+
+    A fraction on its own does not name a sampling scheme, and different subsets of the
+    same size give genuinely different nu_k (at K=25, 1D, phi=0.2 the leading value
+    ranges over roughly 8-30). nu_k(n_per_deme, M, K, phi) is therefore DEFINED here as
+    the median over `n_schemes` random subsets, matching how the measurement itself
+    redraws its demes per replicate.
+
+    Each scheme builds T on the sampled demes from the same full-lattice resistance
+    distance (stepping_stone_detection.stepping_stone_T) and takes the top k eigenvalues
+    of utils.compute_F_hat; the 2D degenerate pair is averaged before the median, since
+    only the subspace is well defined. Reproduces the closed form exactly at phi = 1.
+
+    nu is exactly proportional to 1/M, so the eigendecompositions are done once at a
+    reference M and rescaled -- a sweep over M costs one solve, not one per grid point.
+
+    Returns an array of length k (1 in 1D, 2 in 2D), the k copies being the shared
+    subspace value in 2D.
+    """
+    K_demes = num_demes(K, dimension)
+    k = 1 if dimension == 1 else 2
+    if not 0 < phi <= 1:
+        raise ValueError(f"phi must be in (0, 1], got {phi}")
+
+    n_sampled = max(int(round(phi * K_demes)), k + 1)
+    if n_sampled >= K_demes:
+        return structure_eigenvalues(K, M, n_per_deme, dimension)[:k]
+
+    M_ref = 1.0
+    T = _lattice_T(K, dimension, Ne, M_ref)
+
+    rng = np.random.default_rng(seed)
+    vals = []
+    for _ in range(n_schemes):
+        demes = np.sort(rng.choice(K_demes, n_sampled, replace=False))
+        T_sub = T[np.ix_(demes, demes)]
+        n = np.full(n_sampled, float(n_per_deme))
+        w = np.sort(np.linalg.eigvalsh(compute_F_hat(T_sub, n)))[::-1]
+        vals.append(float(np.mean(w[:k])))    # the degenerate pair shares one value
+
+    return np.full(k, float(np.median(vals)) * M_ref / M)
 
 
 def full_spectrum(K, M, n_per_deme, dimension=1):

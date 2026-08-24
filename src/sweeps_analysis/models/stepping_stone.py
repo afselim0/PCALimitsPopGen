@@ -10,11 +10,14 @@ Policies (see models/__init__.py for why these are explicit rather than defaulte
                     degenerate, so no canonical basis exists inside it and only the
                     subspace is well defined. pc_recovery's principal angles compare
                     subspaces, which is what makes the 2D comparison well posed.
-    theory route    flat -- analytical_cosine's BBP form, as the existing drivers use.
-                    K is comparable to N here, so the Phi_2 criterion behind the exact
-                    route does not apply (see threshold_and_overlap's note on
-                    spectrum_psi); adopting it would be a change in the science, not a
-                    port, so it is left alone.
+    theory route    the exact heteroskedastic route on the per-locus weights h, on both
+                    paths. K is comparable to N here, so the Phi_2 criterion behind it is
+                    not strictly the right one (see threshold_and_overlap's note on
+                    spectrum_psi) -- that question is open and separate from which nu is
+                    fed in.
+    nu              closed form N/(M K_demes mu_k) only at deme_fraction == 1; below that
+                    the median over random deme subsets, see
+                    stepping_stone_grid.subsampled_structure_eigenvalues.
     replicate loop  pc_recovery for even sampling; cell_replicates for random sampling,
                     where phi selects a fresh deme subset per replicate and the
                     theoretical axis therefore changes per replicate.
@@ -30,13 +33,19 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "analysis"))  # src/analysis/
-from pc_recovery import (analytical_cosine, effective_L, principal_cosines,
-                         procrustes_distance, sample_eigenvectors, subsample)
+from pc_recovery import (analytical_cosine, effective_L, locus_moments, locus_weights,
+                         principal_cosines, procrustes_distance, sample_eigenvectors,
+                         subsample)
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))  # src/
+from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "simulations"))  # src/simulations/
 from stepping_stone_grid import (closed_form_eigenvector_1d, closed_form_eigenvector_2d,
-                                 closed_form_spectrum, num_demes)
+                                 closed_form_spectrum, num_demes,
+                                 subsampled_structure_eigenvalues)
 
 SIM_PARAM = "invM"
 X_KEY = "inv_M"
@@ -127,19 +136,23 @@ def axes(ctx, design, sim_row, cfg):
         N = int(n.sum())
         return dict(V_theory=V_full[:, :k], nu=nu, n=n, n_available=None,
                     indices=list(range(k)), select_by_overlap=False, eps=None,
-                    theory_route="flat", per_replicate=False,
+                    theory_route="exact_h", per_replicate=False,
                     extra=dict(K=K, K_demes=K_demes, dimension=dimension, M=M,
                                m=float(sim_row["m"]), Ne=float(sim_row["Ne"]),
                                n_per_deme=n_per, deme_fraction=frac,
                                n_demes_sampled=K_demes, nu_1=float(nu[0])))
 
-    return dict(V_theory=None, nu=nu, n=None, n_available=None,
+    # nu here is the even-sampling closed form and is only a placeholder: the real value
+    # depends on which demes are drawn, so cell_replicates recomputes it as the median
+    # over random subsets and overrides both nu and nu_1.
+    nu_sub = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)
+    return dict(V_theory=None, nu=nu_sub, n=None, n_available=None,
                 indices=list(range(k)), select_by_overlap=False, eps=None,
-                theory_route="flat", per_replicate=True,
+                theory_route="exact_h", per_replicate=True,
                 extra=dict(K=K, K_demes=K_demes, dimension=dimension, M=M,
                            m=float(sim_row["m"]), Ne=float(sim_row["Ne"]),
                            n_per_deme=n_per, deme_fraction=frac,
-                           phi=frac, nu_1=float(nu[0])))
+                           phi=frac, nu_1=float(nu_sub[0])))
 
 
 def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
@@ -159,10 +172,17 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
     k = k_lead(cfg)
     L = cfg["fixed"].get("L")
 
-    _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
-    nu = nu_full[:k]
+    # The closed form presumes every deme is sampled; at phi < 1 nu is the median over
+    # random deme subsets instead (see subsampled_structure_eigenvalues).
+    if phi >= 1.0:
+        _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
+        nu = nu_full[:k]
+    else:
+        nu = subsampled_structure_eigenvalues(K, M, n_per, phi, dimension)
 
     cos_all, dists, L_effs, L_raws = [], [], [], []
+    mu2s, deltas = [], []
+    h_rep0 = None
     for rep in range(n_replicates):
         rng = np.random.default_rng([seed, rep])
         demes = sample_demes(K_demes, phi, rng)
@@ -178,6 +198,14 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
         dists.append(procrustes_distance(V_theory, V_s))
         L_effs.append(effective_L(sub))
         L_raws.append(sub.shape[1])
+        # The locus heteroskedasticity the exact threshold/overlap route needs. Recorded
+        # here as pc_recovery does on the even-sampling path; without it this path could
+        # only ever reach the flat fallback.
+        m2, _, dl = locus_moments(sub)
+        mu2s.append(m2)
+        deltas.append(dl)
+        if rep == 0:
+            h_rep0 = locus_weights(sub)
 
     cos_all = np.array(cos_all)
     mean_cos = cos_all.mean(axis=1)
@@ -185,15 +213,27 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
     L_raw_med = float(np.median(L_raws))
     N_eff = int(n.sum())            # every replicate samples the same total N
     gamma = N_eff / L_eff_med
-    _, analytical_mean = analytical_cosine(nu, gamma, N=N_eff)
+    gamma_raw = N_eff / L_raw_med
+    mu2_med = float(np.median(mu2s))
+    delta_med = float(np.median(deltas))
 
-    return dict(median_cos=float(np.median(mean_cos)),
+    # phi_a is flat over the sampled demes: only they carry samples, and equally many.
+    # eps vanishes -- homogeneous migration and equal deme sizes make every within-deme
+    # coalescent time equal.
+    n_sampled = int(len(demes))
+    phi_a = np.full(n_sampled, 1.0 / n_sampled)
+    _, analytical_mean = analytical_cosine(
+        nu, gamma, N=N_eff, phi=phi_a, eps=np.zeros(n_sampled),
+        gamma_raw=gamma_raw, mu2=mu2_med, delta=delta_med, h=h_rep0)
+
+    return dict(nu=float(np.mean(nu)),
+                median_cos=float(np.median(mean_cos)),
                 se_cos=float(np.std(mean_cos, ddof=1) / np.sqrt(len(mean_cos)))
                 if len(mean_cos) > 1 else np.nan,
                 analytical_cos=analytical_mean,
                 procrustes_d=float(np.median(dists)),
                 L_eff=L_eff_med, L_raw=L_raw_med, gamma=gamma,
-                gamma_raw=N_eff / L_raw_med, mu2=np.nan, delta=np.nan,
+                gamma_raw=gamma_raw, mu2=mu2_med, delta=delta_med, h=h_rep0,
                 N=N_eff, K=K_demes, k=k,
                 n_demes_sampled=int(len(demes)),
                 num_replicates=n_replicates, seed=seed,
@@ -202,20 +242,69 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):
     """
-    1/M -> predicted cos^2, via the flat BBP form.
+    1/M -> predicted cos^2, from the structure eigenvalue at each M.
 
-    nu_k = N / (M * K_demes * mu_k) is linear in 1/M at fixed design, so the closure
-    rescales the recorded nu by the ratio of 1/M values rather than refitting anything.
+    Under EVEN sampling nu_k = N / (M * K_demes * mu_k) with the exact
+    mu_k = 4 sin^2(pi k / 2K) (1D) or mu_k + mu_l (2D), recomputed at every 1/M by
+    closed_form_spectrum rather than rescaling a single recorded anchor. The two agree
+    here -- nu really is proportional to 1/M with no pedestal -- but recomputing keeps
+    the exact mu_k in the loop instead of inheriting whatever the anchor cell held.
+
+    That closed form presumes every deme is sampled and is WRONG at deme_fraction < 1,
+    where it overstates nu badly (1D, K=25, phi=0.2: 101 against an actual ~18). A
+    fraction does not name a scheme, so nu is taken from
+    subsampled_structure_eigenvalues, which defines it as the median over 16 random deme
+    subsets -- the same redraw the measurement performs per replicate.
+
+    The overlap goes through the exact heteroskedastic route on the per-locus weights h
+    when the sidecar supplies them, falling back to the two-moment route otherwise. eps
+    is zero throughout: homogeneous migration and equal deme sizes make every
+    within-deme coalescent time equal (see stepping_stone_grid.full_spectrum).
+
+    Caveat carried from the module docstring: K is comparable to N here, so the Phi_2
+    criterion behind this route is not the strictly correct one -- spectrum_psi is (see
+    threshold_and_overlap). This uses the exact route as asked; the criterion question is
+    separate.
     """
-    nu_ref = float(measured.get("nu_1", np.nan))
-    inv_M_ref = 1.0 / float(ctx["M"])
-    gamma = float(measured["gamma"])
+    K, dimension = ctx["K"], ctx["dimension"]
+    K_demes = ctx["K_demes"]
+    n_per = int(measured.get("n_per_deme", design["n_per_deme"]
+                             if isinstance(design, dict) else 0))
+    k = k_lead(cfg)
     N = int(measured["N"])
-    if not np.isfinite(nu_ref) or nu_ref <= 0:
+    gamma_raw = float(measured["gamma_raw"])
+    if not n_per or not np.isfinite(gamma_raw) or gamma_raw <= 0:
         return None
 
+    # Only the sampled demes carry samples, and each carries the same number, so phi is
+    # flat over however many demes the design actually covers.
+    n_demes = int(measured.get("n_demes_sampled", K_demes))
+    phi = np.full(n_demes, 1.0 / n_demes)
+    eps = np.zeros(n_demes)
+
+    h = measured.get("h")
+    use_exact = h is not None and len(np.asarray(h))
+    if use_exact:
+        h = np.asarray(h, dtype=float)
+        nu_c = exact_nu_c(phi, eps, h, gamma_raw)
+    else:
+        mu2, delta = float(measured["mu2"]), float(measured["delta"])
+        if not np.isfinite(mu2) or not np.isfinite(delta):
+            # The random-sampling path records mu2/delta as NaN, so without h there is
+            # nothing to build an exact prediction from.
+            return None
+        nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
+
+    frac = float(measured.get("deme_fraction", n_demes / K_demes))
+
     def overlap(inv_M):
-        nu = nu_ref * (float(inv_M) / inv_M_ref)
-        _, mean = analytical_cosine(np.atleast_1d(nu), gamma, N=N)
-        return float(mean) ** 2
+        M = 1.0 / float(inv_M)
+        if frac >= 1.0:
+            _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
+        else:
+            nu_full = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)
+        nu = float(np.mean(nu_full[:k]))       # the degenerate pair shares one value in 2D
+        if use_exact:
+            return exact_overlap(nu, phi, eps, h, gamma_raw, nu_c=nu_c)
+        return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
     return overlap

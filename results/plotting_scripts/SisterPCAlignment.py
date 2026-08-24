@@ -1,22 +1,22 @@
 #%%
 """
-PC alignment for a recently split sister pair, against the zero-parameter prediction.
+PC alignment for a recently split sister pair, as a detection threshold in Fst.
 
 A  PC alignment vs Fst at nine sample sizes N, with the sisters held at phi_1 = phi_2 = 0.05.
 B  PC alignment vs Fst at ten sampling balances, N = 1000 and the sisters sharing 200
    samples between them, split from (5, 195) through (100, 100).
 
-Solid lines are the measured median over replicates. Dashed lines are the BBP prediction
-using the **exact** nu from the full coalescent-time matrix; dotted lines use the
-approximate nu = N*H*Fst (eps_a = 0), which understates the exact value by
-nu_exact = 1.379*(N H Fst) + 0.344 -- the gap between the dashed and dotted curves is that
-approximation error alone, since both share the same measured gamma.
+Each curve is fitted through every replicate (not through their medians) with a bootstrap
+band. The comparison against theory is a pair of vertical lines rather than a prediction
+drawn at every x: a thin solid line at the Fst where the fit reaches squared overlap 0.9,
+and a dashed line at the Fst where the theory does.
 
-No floor is applied to the prediction -- see bbp_overlap. The measured curves plateau at a
-nonzero value at low Fst; that plateau is set by the estimator (argmax over candidate
-eigenvectors, within the n_1+n_2 rows the axis is supported on) and is not part of the
-theoretical curve. Adding it in quadrature inflates the prediction by ~0.12 and roughly
-doubles the error, so it is left off.
+The theoretical crossing uses the exact heteroskedastic machinery, not the flat sqrt(gamma)
+threshold. That distinction matters here: eps_a is nonzero on this demography (tau/tau_bar
+spans 0.81-1.17), and at low Fst the exact nu_c sits *above* nu, so the correct prediction
+is 0 -- while sqrt(gamma) sits *below* nu and the flat formula would draw a large
+false-positive plateau. nu itself is the exact value from the full coalescent-time matrix,
+which the analysis already computed; it is not re-derived here.
 
 Why the exact nu and not the split-attributable part. Inverting the overlap law on the 434
 cells with |cos| > 0.5 gives nu_implied/nu_exact = 1.018 -- BBP fed the exact eigenvalue
@@ -24,119 +24,98 @@ recovers the eigenvalue that produced the observed overlap, to 2%. Against the
 pedestal-removed value it is off by 27%. So the additive pedestal contributes real
 recoverable signal and belongs in nu.
 
-Why the support floor. The sister axis is exactly zero outside the sister rows, so the
-relevant ambient dimension is n_1+n_2, not N; and the axis is located by argmax over
-candidate eigenvectors, which lifts the floor further. See support_overlap_floor.
-
-Residual: the agreement degrades at small H (the implied/exact ratio drifts 0.79 to 1.10
-across the H range), which is unmodelled and tracks the sister-block dimension.
+The measured curves plateau at a nonzero value at low Fst. That plateau is set by the
+estimator (a fixed-rank read within the n_1+n_2 rows the axis is supported on) and is not
+part of the theoretical curve -- which is exactly why the fit has a free floor rather than
+one pinned at zero: the floor absorbs it instead of dragging the transition.
 
 Panel B is the substantive one. Every curve in it spends the *same* 200 samples on the
 sister pair; only the balance differs. Because H is a harmonic mean it is capped by
-2*min(phi_1, phi_2), so the lopsided designs waste their larger sister: at the deepest split
-the (5, 195) design gives |cos| ~ 0.16 while (100, 100) gives ~0.80, from the same
+2*min(phi_1, phi_2), so the lopsided designs waste their larger sister: the (5, 195) design
+needs a far deeper split to reach the same overlap that (100, 100) reaches, from identical
 sequencing effort. The colourbar is therefore labelled by H rather than by a sample count,
 since H -- not the number of sister samples -- is what sets detectability.
 
-Reads results/analysis/SisterPCAlignment, writes results/figures/SisterPCAlignment.pdf
+Reads results/analysis/SisterPCAlignment/{vary_N,vary_phi}_replicates.csv, writes
+results/figures/SisterPCAlignment.pdf
 """
 import os
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib import cm, colors
+from matplotlib import cm
 
+from crossing_panel import crossing_panel, crossing_table, encoding_legend
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
+from threshold_and_overlap import approx_nu_c, approx_overlap
+
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SisterPCAlignment")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
 CMAP_N = cm.viridis
 CMAP_H = cm.plasma
+TARGET = 0.9
 
 
-def bbp_overlap(nu, gamma):
+def theory_for(df, level_key):
     """
-    |cos| = sqrt((1-gamma/nu^2)/(1+gamma/nu)), unfloored.
+    curve -> (Fst -> predicted squared overlap), for the dashed vertical lines.
 
-    No floor is applied. The measured cosine saturates at a nonzero value when there is no
-    signal -- the estimator picks the best-matching eigenvector out of many, in the subspace
-    the axis is supported on -- but that is a property of the *estimator*, not of the
-    covariance. Adding it to a prediction that already goes to zero double-counts: measured
-    against the sweep it inflates every curve by ~0.12 (RMSE 0.123 -> 0.189, bias +0.02 ->
-    +0.13). The floor belongs in the interpretation of the measurement's plateau, not in the
-    theoretical curve.
+    nu is very nearly linear in Fst at fixed design, so this fits a line through the
+    curve's own (Fst, nu) pairs -- the exact nu the analysis recorded from the full
+    coalescent-time matrix -- and feeds it to the heteroskedastic overlap. Fitting the line
+    rather than assuming nu = N*H*Fst keeps the additive pedestal: nu does not pass through
+    the origin, and dropping the intercept is what makes the approximate form understate it.
     """
-    nu = np.asarray(nu, dtype=float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ov = np.where(nu > np.sqrt(gamma), (1 - gamma / nu ** 2) / (1 + gamma / nu), 0.0)
-    return np.sqrt(np.clip(ov, 0.0, 1.0))
+    def make(level):
+        d = df[df[level_key] == level]
+        if d.empty:
+            return None
+        cells = d.groupby("Fst").first().reset_index()
+        if len(cells) < 2:
+            return None
+        slope, intercept = np.polyfit(cells.Fst.to_numpy(float), cells.nu.to_numpy(float), 1)
+
+        gamma_raw = float(cells.gamma_raw.median())
+        mu2 = float(cells.mu2.median())
+        delta = float(cells.delta.median())
+        phi1, phi2 = float(cells.phi1.iloc[0]), float(cells.phi2.iloc[0])
+        # The two sisters plus everything else: only the sister proportions matter for this
+        # axis, and the remainder carries no weight on it.
+        phi = np.array([phi1, phi2, max(1.0 - phi1 - phi2, 1e-12)])
+        eps = np.zeros(3)
+        nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
+        return lambda fst: approx_overlap(slope * fst + intercept, phi, eps,
+                                          gamma_raw, mu2, delta, nu_c=nu_c)
+    return make
 
 
-def panel(ax, df, key, cmap, label, title):
-    """
-    One sweep: measured median as a solid line, BBP prediction using the exact nu dashed
-    and using the approximate nu (N*H*Fst) dotted, per level.
-
-    Levels are coloured by the swept parameter on a shared normalization, so the colourbar
-    reads directly onto the curves.
-    """
-    levels = np.sort(df[key].unique())
-    norm = colors.Normalize(vmin=levels.min(), vmax=levels.max())
-
-    for level in levels:
-        d = df[df[key] == level].sort_values("Fst")
-        color = cmap(norm(level))
-        ax.plot(d.Fst, d.cos_median, "-", color=color, linewidth=1.5, zorder=3)
-        ax.plot(d.Fst, bbp_overlap(d.nu, d.gamma), "--", color=color,
-                linewidth=1.1, alpha=0.85, zorder=2)
-        ax.plot(d.Fst, bbp_overlap(d.nu_approx, d.gamma), ":", color=color,
-                linewidth=1.1, alpha=0.85, zorder=2)
-
-    ax.set_xscale("log")
-    ax.set_xlabel(r"$F_{ST}$")
-    ax.set_ylabel(r"Cosine similarity: $|\langle \hat u_1, u_1\rangle|$")
-    ax.set_ylim(-0.04, 1.04)
-    ax.set_title(title)
-
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(label)
-    cbar.outline.set_visible(False)
-    return norm
-
-
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
+def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     setup_plotting_style()
-    vary_N = pd.read_csv(os.path.join(analysis_dir, "vary_N.csv"))
-    vary_phi = pd.read_csv(os.path.join(analysis_dir, "vary_phi.csv"))
+    vary_N = pd.read_csv(os.path.join(analysis_dir, "vary_N_replicates.csv"))
+    vary_phi = pd.read_csv(os.path.join(analysis_dir, "vary_phi_replicates.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2))
 
-    n_reps = int(vary_N.num_replicates.iloc[0])
-    L_eff_N = vary_N.L_eff.median()
-    L_eff_phi = vary_phi.L_eff.median()
     H_N = vary_N.H.iloc[0]
     N_phi = int(vary_phi.N.iloc[0])
     sister_total = int(vary_phi.n_sister1.iloc[0] + vary_phi.n_sister2.iloc[0])
 
-    panel(axes[0], vary_N, "N", CMAP_N, r"$N$",
-          rf"varying $N$  ($H={H_N:g}$, $L_{{\mathrm{{eff}}}}\approx{L_eff_N:.0f}$)")
-    panel(axes[1], vary_phi, "H", CMAP_H, r"$H$",
-          rf"varying $\phi_1{{:}}\phi_2$  ($N={N_phi}$, "
-          rf"$n_1{{+}}n_2={sister_total}$, $L_{{\mathrm{{eff}}}}\approx{L_eff_phi:.0f}$)")
+    res_N = crossing_panel(axes[0], vary_N, "N", "Fst", CMAP_N, r"$N$", target=target,
+                           theory_overlap=theory_for(vary_N, "N"))
+    res_H = crossing_panel(axes[1], vary_phi, "H", "Fst", CMAP_H, r"$H$", target=target,
+                           theory_overlap=theory_for(vary_phi, "H"))
 
-    axes[0].plot([], [], "-", color="0.35", linewidth=1.5,
-                 label=f"simulation (median of {n_reps})")
-    axes[0].plot([], [], "--", color="0.35", linewidth=1.1,
-                 label=r"BBP prediction (exact $\nu$)")
-    axes[0].plot([], [], ":", color="0.35", linewidth=1.1,
-                 label=r"BBP prediction (approx. $\nu = NHF_{ST}$)")
-    # Lower left: the curves occupy the upper left at high Fst and the legend collided there.
-    axes[0].legend(loc="lower right", fontsize=9, frameon=False)
+    for ax in axes:
+        ax.set_xlabel(r"$F_{ST}$")
+    axes[0].set_title(rf"varying $N$  ($H={H_N:g}$)")
+    axes[1].set_title(rf"varying $\phi_1{{:}}\phi_2$  ($N={N_phi}$, $n_1{{+}}n_2={sister_total}$)")
+    encoding_legend(axes[0], target=target, loc="lower right")
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,
@@ -148,6 +127,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     fig.savefig(out, bbox_inches="tight")
     fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
     print(f"wrote {out}")
+    print(crossing_table(res_N, "N", "Fst"))
+    print(crossing_table(res_H, "H", "Fst"))
     return fig
 
 

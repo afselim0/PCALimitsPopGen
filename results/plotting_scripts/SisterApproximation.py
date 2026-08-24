@@ -15,9 +15,9 @@ two separable corrections, both traceable to eps_a != 0:
 
   * multiplicative 1.379 -- the sisters sit at tau/tau_bar = 1.166, 1.168 against CEU/CHB at
     0.855, 0.811, so the eps_a weighting rescales the Fst-driven term.
-  * additive 0.344 -- a pedestal surviving as Fst -> 0. YRI and YRI2 differ from the *sample*
-    mean even when identical to each other, so the sister contrast keeps a nonzero
-    eigenvalue at zero split depth.
+  * additive 0.344 -- a pedestal surviving as Fst -> 0. YRI1 and YRI2 differ from the
+    *sample* mean even when identical to each other, so the sister contrast keeps a
+    nonzero eigenvalue at zero split depth.
 
 Plotting the ratio alone hides this: an additive offset renders as a divergence wherever
 N*H*Fst is small, which is why the ratio looked like a design-dependent 1.10-1.99 factor.

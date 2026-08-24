@@ -1,14 +1,16 @@
 #%%
 """
-Random deme sampling demonstrated, 1D and 2D (2 blocks of 2x3, total 2x6).
+Random deme sampling demonstrated, 1D and 2D (6x3).
 
-Each block (1D top, 2D bottom) has 3 columns, one per sampling fraction phi in
-[0.2, 0.4, 0.6]:
+Six rows, one per (dimension, phi): 1D phi in [0.2, 0.4, 0.6], then 2D phi in
+[0.2, 0.4, 0.6]. Three columns:
 
     column 1  the sampling scheme: demes as circles (chain for 1D, grid for 2D),
-              connected by lines showing the migration graph, sampled demes filled grey
-    column 2  PC1 (1D) or PC1 vs PC2 (2D) for the samples actually drawn at that phi,
-              n_per_deme = 8, colored by deme index
+              connected by lines showing the migration graph, colored by deme index
+              (viridis), sampled demes at full alpha and unsampled demes faded
+    column 2  PC1 (1D) or PC1 vs PC2 (2D) at M near M_c (structure visible but not
+              saturated), colored by deme index
+    column 3  same, at M well above M_c (effectively no structure)
 
 Reads results/analysis/SteppingStoneRandomDemo, writes
 results/figures/SteppingStoneRandomDemo.pdf
@@ -27,22 +29,24 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStoneRandomDemo")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
-COLOR_SAMPLED = "0.55"
-COLOR_UNSAMPLED = "white"
 COLOR_EDGE = "0.2"
 CMAP = cm.viridis
+ALPHA_SAMPLED = 0.95
+ALPHA_UNSAMPLED = 0.15
+M_LEVELS = ["near_Mc", "high"]
+M_LEVEL_TITLES = {"near_Mc": r"$M \approx M_c$", "high": r"$M \gg M_c$"}
 
 
-def scheme_1d(ax, demes, K, phi):
-    """A chain of K circles, connected by lines, sampled ones filled grey."""
+def scheme_1d(ax, demes, K, phi, norm):
+    """A chain of K circles, connected by lines, colored by deme index, faded if unsampled."""
     xs = np.arange(K)
     for x in xs[:-1]:
         ax.plot([x, x + 1], [0, 0], "-", color=COLOR_EDGE, linewidth=1.0, zorder=1)
     for x in xs:
         sampled = bool(demes[demes.deme == x].sampled.iloc[0])
-        color = COLOR_SAMPLED if sampled else COLOR_UNSAMPLED
-        ax.add_patch(Circle((x, 0), 0.32, facecolor=color, edgecolor=COLOR_EDGE,
-                            linewidth=0.9, zorder=2))
+        alpha = ALPHA_SAMPLED if sampled else ALPHA_UNSAMPLED
+        ax.add_patch(Circle((x, 0), 0.32, facecolor=CMAP(norm(x)), edgecolor=COLOR_EDGE,
+                            linewidth=0.9, alpha=alpha, zorder=2))
     ax.set_xlim(-0.7, K - 0.3)
     ax.set_ylim(-1.0, 1.0)
     ax.set_aspect("equal")
@@ -50,11 +54,10 @@ def scheme_1d(ax, demes, K, phi):
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.set_title(rf"$\phi={phi:g}$")
 
 
-def scheme_2d(ax, demes, K, phi):
-    """A K x K grid of circles, nearest-neighbour lines, sampled ones filled grey."""
+def scheme_2d(ax, demes, K, phi, norm):
+    """A K x K grid of circles, nearest-neighbour lines, colored by deme index, faded if unsampled."""
     for r in range(K):
         for c in range(K):
             if c + 1 < K:
@@ -63,10 +66,11 @@ def scheme_2d(ax, demes, K, phi):
                 ax.plot([c, c], [r, r + 1], "-", color=COLOR_EDGE, linewidth=0.8, zorder=1)
     for r in range(K):
         for c in range(K):
+            deme_idx = r * K + c
             sampled = bool(demes[(demes.row == r) & (demes.col == c)].sampled.iloc[0])
-            color = COLOR_SAMPLED if sampled else COLOR_UNSAMPLED
-            ax.add_patch(Circle((c, r), 0.32, facecolor=color, edgecolor=COLOR_EDGE,
-                                linewidth=0.7, zorder=2))
+            alpha = ALPHA_SAMPLED if sampled else ALPHA_UNSAMPLED
+            ax.add_patch(Circle((c, r), 0.32, facecolor=CMAP(norm(deme_idx)),
+                                edgecolor=COLOR_EDGE, linewidth=0.7, alpha=alpha, zorder=2))
     ax.set_xlim(-0.7, K - 0.3)
     ax.set_ylim(-0.7, K - 0.3)
     ax.set_aspect("equal")
@@ -74,17 +78,16 @@ def scheme_2d(ax, demes, K, phi):
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.set_title(rf"$\phi={phi:g}$")
 
 
-def pc_panel_1d(ax, d, K, norm):
+def pc_panel_1d(ax, d, norm):
     ax.scatter(d.pc1, np.zeros(len(d)), c=d.deme, cmap=CMAP, norm=norm, s=10,
               edgecolors='none')
     ax.set_yticks([])
     ax.set_xlabel("PC1")
 
 
-def pc_panel_2d(ax, d, K_demes, norm):
+def pc_panel_2d(ax, d, norm):
     ax.scatter(d.pc1, d.pc2, c=d.deme, cmap=CMAP, norm=norm, s=10, edgecolors='none')
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
@@ -95,30 +98,36 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     setup_plotting_style()
     demes = pd.read_csv(os.path.join(analysis_dir, "sampled_demes.csv"))
     pcs = pd.read_csv(os.path.join(analysis_dir, "pcs.csv"))
-    meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).set_index("dimension")
+    meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).set_index(["dimension", "m_level"])
 
     phis = sorted(pcs.phi.unique())
-    K_1d = int(meta.loc[1, "K"])
-    K_2d = int(meta.loc[2, "K"])
+    K_1d = int(demes[demes.dimension == 1].deme.max()) + 1
+    K_2d_side = int(np.sqrt(int(demes[demes.dimension == 2].deme.max()) + 1))
     norm_1d = colors.Normalize(vmin=0, vmax=K_1d - 1)
-    norm_2d = colors.Normalize(vmin=0, vmax=K_2d * K_2d - 1)
+    norm_2d = colors.Normalize(vmin=0, vmax=K_2d_side * K_2d_side - 1)
 
-    fig, axes = plt.subplots(2, 6, figsize=(17.0, 5.6),
-                             gridspec_kw=dict(width_ratios=[1, 1, 1, 1, 1, 1]))
+    rows = [(1, phi) for phi in phis] + [(2, phi) for phi in phis]
+    fig, axes = plt.subplots(6, 3, figsize=(9.0, 16.5))
 
-    for j, phi in enumerate(phis):
-        d1 = demes[(demes.dimension == 1) & (demes.phi == phi)]
-        scheme_1d(axes[0, j], d1, K_1d, phi)
-        p1 = pcs[(pcs.dimension == 1) & (pcs.phi == phi)]
-        pc_panel_1d(axes[0, j + 3], p1, K_1d, norm_1d)
+    for i, (dimension, phi) in enumerate(rows):
+        d_demes = demes[(demes.dimension == dimension) & (demes.phi == phi)]
+        K = K_1d if dimension == 1 else K_2d_side
+        norm = norm_1d if dimension == 1 else norm_2d
+        scheme_func = scheme_1d if dimension == 1 else scheme_2d
+        pc_func = pc_panel_1d if dimension == 1 else pc_panel_2d
 
-        d2 = demes[(demes.dimension == 2) & (demes.phi == phi)]
-        scheme_2d(axes[1, j], d2, K_2d, phi)
-        p2 = pcs[(pcs.dimension == 2) & (pcs.phi == phi)]
-        pc_panel_2d(axes[1, j + 3], p2, K_2d * K_2d, norm_2d)
+        scheme_func(axes[i, 0], d_demes, K, phi, norm)
+        axes[i, 0].set_ylabel(f"{dimension}D  " + rf"$\phi={phi:g}$", fontsize=10)
 
-    axes[0, 0].set_ylabel(f"1D  (K={K_1d})\nsampling scheme", fontsize=10)
-    axes[1, 0].set_ylabel(f"2D  (K={K_2d})\nsampling scheme", fontsize=10)
+        for j, level in enumerate(M_LEVELS):
+            p = pcs[(pcs.dimension == dimension) & (pcs.phi == phi) & (pcs.m_level == level)]
+            pc_func(axes[i, j + 1], p, norm)
+            if phi == phis[0]:
+                ratio = meta.loc[(dimension, level), "M_over_Mc"]
+                axes[i, j + 1].set_title(M_LEVEL_TITLES[level] + rf"  ($M/M_c={ratio:.2g}$)")
+
+    axes[0, 0].set_title("sampling scheme")
+    axes[len(phis), 0].set_title("sampling scheme")
 
     fig.tight_layout()
     os.makedirs(figure_dir, exist_ok=True)

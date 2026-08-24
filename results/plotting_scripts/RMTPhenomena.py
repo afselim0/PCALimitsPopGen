@@ -1,6 +1,6 @@
 #%%
 """
-Three RMT phenomena on a two-population split, at N = 400 and L_input = 2e4.
+Three RMT phenomena on a two-population split, at N = 1e3 and L_input = 1e5.
 
 A  Eigenvalue spreading. The 398 bulk eigenvalues of one spectrum (grey histogram) against
    the Marchenko-Pastur density computed two ways: with the raw SNP count L, and with the
@@ -76,9 +76,11 @@ def panel_A(ax, spectrum, meta):
 
     # Each curve is drawn over its own support, so the narrower raw-L density is visibly
     # confined well inside the observed bulk rather than being clipped to it.
+    L_raw = float(spectrum.L_raw.iloc[0])
+    L_eff = float(spectrum.L_eff.iloc[0])
     for gamma, color, label in [
-            (gamma_raw, COLOR_RAW, rf'MP, raw $L$  ($\gamma={gamma_raw:.3f}$)'),
-            (gamma_eff, COLOR_EFF, rf'MP, $L_{{\mathrm{{eff}}}}$  ($\gamma={gamma_eff:.3f}$)')]:
+            (gamma_raw, COLOR_RAW, rf'raw $L$  ({L_raw:.0f})'),
+            (gamma_eff, COLOR_EFF, rf'effective $L$  ({L_eff:.0f})')]:
         grid = np.linspace(floor * (1 - np.sqrt(gamma)) ** 2,
                            floor * (1 + np.sqrt(gamma)) ** 2, 800)
         ax.plot(grid, mp_density(grid, gamma, scale=floor), color=color, linewidth=2.3,
@@ -89,7 +91,7 @@ def panel_A(ax, spectrum, meta):
     ax.set_xlabel(r'sample eigenvalue $\hat\lambda$')
     ax.set_ylabel('density')
     ax.set_ylim(bottom=0)
-    ax.set_title(rf'Eigenvalue spreading  ($N={N}$)')
+    ax.set_title('Eigenvalue spreading')
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.20), fontsize=11,
               frameon=False)
 
@@ -109,7 +111,7 @@ def panel_B(ax, sweep, meta):
     ax.set_xscale('log')
     ax.set_xlabel(r'$F_{ST}$')
     ax.set_ylabel(r'$\hat\lambda_1\,/\,\hat\lambda_2$')
-    ax.set_title(rf'Spiked eigenvalue transition  ($N={int(meta.N)}$)')
+    ax.set_title('Spiked eigenvalue transition')
     # Below the axes, matching panel A. Panel C omits its legend entirely and is read
     # against this one, so it has to sit where both panels can be compared against it.
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.20), fontsize=11,
@@ -124,7 +126,7 @@ def panel_C(ax, sweep, meta):
     ax.set_xlabel(r'$F_{ST}$')
     ax.set_ylabel(r'$|\langle \hat v_1, v_1\rangle|$')
     ax.set_ylim(-0.04, 1.04)
-    ax.set_title(rf'Eigenvector inconsistency  ($N={int(meta.N)}$)')
+    ax.set_title('Eigenvector inconsistency')
     # No legend: the two threshold lines are the same as panel B's and are read off it.
 
 

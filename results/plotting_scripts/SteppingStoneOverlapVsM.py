@@ -1,71 +1,58 @@
 #%%
 """
-PC recovery vs M, even sampling, 1D and 2D -- one curve per n_per_deme.
+Spatial-axis recovery vs migration, sampling every deme.
 
-A  1D: |cos| between PC1 and the leading closed-form eigenvector.
-B  2D: procrustes-aligned subspace cosine between the top two PCs and the degenerate
-   (1,0)/(0,1) pair.
+A  1D stepping stone, every deme sampled, curves are n-per-deme.
+B  2D stepping stone, every deme sampled, curves are n-per-deme (degenerate leading pair).
 
-Solid lines are the measured median over replicates; dashed lines are the BBP prediction
-(analytical_cos, built from the measured L_eff and the closed-form nu -- no free
-parameters). Colour encodes n_per_deme.
+x is 1/M rather than M: overlap grows as migration weakens, so the reciprocal makes the
+transition curve increasing. That reciprocal is applied in the analysis, not here.
 
-Reads results/analysis/SteppingStoneEvenSampling, writes
-results/figures/SteppingStoneOverlapVsM.pdf
+The fit, the band and the theoretical crossing are computed upstream by
+src/sweeps_analysis/summarise.py and read here as columns -- this script draws, it does not
+fit, and it holds no theory of its own. A thin solid vertical line marks the 1/M where the
+fit reaches squared overlap 0.9, a dashed line where theory does.
+
+2D compares the degenerate (1,0)/(0,1) pair as a subspace (procrustes-aligned principal
+angles), since no canonical basis exists inside a degenerate eigenspace.
+
+Reads results/sweep_summaries/stepping_stone_even/{curves,crossings,points}.csv
+Writes results/figures/SteppingStoneOverlapVsM.pdf
 """
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from matplotlib import cm, colors
+from matplotlib import cm
 
+from crossing_panel import crossing_panel_from_summary, crossing_table, encoding_legend
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStoneEvenSampling")
+SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries", "stepping_stone_even")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
-CMAP_N = cm.viridis
+CMAP = cm.viridis
+TARGET = 0.9
+SWEEPS = [("ss1d_vary_n", "1D"), ("ss2d_vary_n", "2D")]
 
 
-def panel(ax, df, title):
-    n_values = np.sort(df.n_per_deme.unique())
-    norm = colors.Normalize(vmin=n_values.min(), vmax=n_values.max())
-
-    for n_per in n_values:
-        d = df[df.n_per_deme == n_per].sort_values("M")
-        color = CMAP_N(norm(n_per))
-        ax.plot(d.M, d.median_cos, "-", color=color, linewidth=1.5, zorder=3)
-        ax.plot(d.M, d.analytical_cos, "--", color=color, linewidth=1.1, alpha=0.85,
-                zorder=2)
-
-    ax.set_xscale("log")
-    ax.set_xlabel(r"$M$")
-    ax.set_ylabel("cosine similarity")
-    ax.set_ylim(-0.04, 1.04)
-    ax.set_title(title)
-
-    sm = cm.ScalarMappable(norm=norm, cmap=CMAP_N)
-    sm.set_array([])
-    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(r"$n_{\mathrm{per\,deme}}$")
-    cbar.outline.set_visible(False)
-
-
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
+def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     setup_plotting_style()
-    df_1d = pd.read_csv(os.path.join(analysis_dir, "even_1D.csv"))
-    df_2d = pd.read_csv(os.path.join(analysis_dir, "even_2D.csv"))
+    curves = pd.read_csv(os.path.join(summary_dir, "curves.csv"))
+    crossings = pd.read_csv(os.path.join(summary_dir, "crossings.csv"))
+    points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.2))
-    panel(axes[0], df_1d, rf"1D  ($K={int(df_1d.K.iloc[0])}$)")
-    panel(axes[1], df_2d, rf"2D  ($K={int(df_2d.K.iloc[0])}$)")
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    results = []
+    for ax, (sweep, label) in zip(axes, SWEEPS):
+        res = crossing_panel_from_summary(ax, curves, crossings, points, sweep=sweep,
+                                          cmap=CMAP, cbar_label=r"$n_{\mathrm{per\,deme}}$", target=target)
+        ax.set_xlabel(r"$1/M$")
+        ax.set_title(label)
+        results.append(res)
 
-    axes[0].plot([], [], "-", color="0.35", linewidth=1.5, label="simulation (median)")
-    axes[0].plot([], [], "--", color="0.35", linewidth=1.1, label="BBP prediction")
-    axes[0].legend(loc="lower right", fontsize=9, frameon=False)
-
+    encoding_legend(axes[0], target=target, loc="lower right")
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")
@@ -76,6 +63,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     fig.savefig(out, bbox_inches="tight")
     fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
     print(f"wrote {out}")
+    for (_, label), res in zip(SWEEPS, results):
+        print(f"\n{label}")
+        print(crossing_table(res, "n", "1/M"))
     return fig
 
 

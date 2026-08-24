@@ -57,6 +57,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
     K_1d = int(meta.loc[(1, REGIMES[0])].K)
     K_2d = int(meta.loc[(2, REGIMES[0])].K)
+    n_1d = int(meta.loc[(1, REGIMES[0])].n_per_deme)
+    n_2d = int(meta.loc[(2, REGIMES[0])].n_per_deme)
     norm_1d = colors.Normalize(vmin=0, vmax=K_1d - 1)
     norm_2d = colors.Normalize(vmin=0, vmax=K_2d * K_2d - 1)
 
@@ -68,8 +70,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         d2 = pcs[(pcs.dimension == 2) & (pcs.regime == regime)]
         panel_2d(axes[1, j], d2, meta.loc[(2, regime)], norm_2d)
 
-    axes[0, 0].set_ylabel(rf'1D ($K={K_1d}$)' + '\nPC1')
-    axes[1, 0].set_ylabel(rf'2D ($K={K_2d}$)' + '\nPC2')
+    axes[0, 0].set_ylabel(rf'1D ($K={K_1d}$, $n={n_1d}$)' + '\nPC1')
+    axes[1, 0].set_ylabel(rf'2D ($K={K_2d}$, $n={n_2d}$)' + '\nPC2')
 
     for i, letter in enumerate("AB"):
         axes[i, 0].text(-0.22, 1.05, letter, transform=axes[i, 0].transAxes,

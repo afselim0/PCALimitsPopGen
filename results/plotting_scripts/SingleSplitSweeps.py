@@ -1,106 +1,69 @@
 #%%
 """
-PC1 recovery across the two-population split sweep, against the zero-parameter prediction.
+PC1 recovery across the two-population split sweep, as a detection threshold in Fst.
 
-A  PC1 overlap vs Fst at ten sample sizes N (phi = 0.5).
-B  PC1 overlap vs Fst at ten sampling fractions phi (N = 200).
+A  PC1 squared overlap vs Fst at ten sample sizes N (phi = 0.5).
+B  PC1 squared overlap vs Fst at ten sampling fractions phi (N = 200).
 
-In both panels the line is the BBP prediction
+Each level is drawn as a curve fitted through every replicate (not through their medians),
+with a bootstrap band, and the comparison against theory is made at a single point rather
+than along the whole curve: a thin solid vertical line marks the Fst where the fit reaches
+squared overlap 0.9, and a dashed vertical line the Fst where the theory does.
 
-    |cos| = sqrt((1 - gamma/nu^2) / (1 + gamma/nu)),   gamma = N/L_eff,
-    nu = 2*N*phi*(1-phi)*Fst
+The fit, the band and the theoretical crossing are all computed upstream by
+src/sweeps_analysis/summarise.py and read here as columns -- this script draws, it does not
+fit, and it holds no theory of its own. The theoretical crossing inverts the exact Ding &
+Yang overlap (src/threshold_and_overlap) for nu = 2 N phi (1-phi) Fst using each level's own
+measured L_eff and locus moments, so nothing in it is fitted: the gap between the solid and
+dashed line at each level is the whole result.
 
-and the scatter is the measured median over replicates. The prediction is built from the
-measured L_eff and the theoretical nu, so nothing in it is fitted -- the points either land
-on the curve or they do not.
-
-Colour encodes the swept parameter through a colourbar rather than a legend: ten levels
-would otherwise need ten legend entries per panel, and the sweep is an ordered quantity,
-which a sequential colour map conveys directly.
-
-Reads results/analysis/SingleSplitSweeps, writes results/figures/SingleSplitSweeps.pdf
+Reads results/sweep_summaries/single_split/{curves,crossings,points}.csv
+    (sweeps split_vary_N and split_vary_phi)
+Writes results/figures/SingleSplitSweeps.pdf
 """
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from matplotlib import cm, colors
+from matplotlib import cm
 
+from crossing_panel import crossing_panel_from_summary, crossing_table, encoding_legend
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SingleSplitSweeps")
+SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries", "single_split")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
 CMAP_N = cm.viridis
 CMAP_PHI = cm.plasma
+TARGET = 0.9
 
 
-def panel(ax, df, key, cmap, label, title):
-    """
-    One sweep: measured median as a line, zero-parameter prediction as scatter.
-
-    Levels are coloured by the swept parameter on a shared normalization, so the colourbar
-    reads directly onto the curves.
-    """
-    levels = np.sort(df[key].unique())
-    norm = colors.Normalize(vmin=levels.min(), vmax=levels.max())
-
-    for level in levels:
-        d = df[df[key] == level].sort_values("Fst")
-        color = cmap(norm(level))
-        ax.plot(d.Fst, d.analytical_cos_axis0, "-", color=color, linewidth=1.4, zorder=2)
-        # Measurements are subsampled: at every one of the 100 Fst values they would crowd
-        # into a solid band and hide the curve they are meant to be compared against.
-        s = d.iloc[::4]
-        ax.scatter(s.Fst, s.cos_axis0, s=11, facecolors="none",
-                   edgecolors=color, linewidths=0.9, zorder=3)
-
-    ax.set_xscale("log")
-    ax.set_xlabel(r"$F_{ST}$")
-    ax.set_ylabel(r"Cosine similarity: $|\langle \hat u_1, u_1\rangle|$")
-    ax.set_ylim(-0.04, 1.04)
-    ax.set_title(title)
-
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(label)
-    cbar.outline.set_visible(False)
-    return norm
+def load_summary(summary_dir):
+    """The three summary frames a panel needs."""
+    return (pd.read_csv(os.path.join(summary_dir, "curves.csv")),
+            pd.read_csv(os.path.join(summary_dir, "crossings.csv")),
+            pd.read_csv(os.path.join(summary_dir, "points.csv")))
 
 
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
+def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     setup_plotting_style()
-    vary_N = pd.read_csv(os.path.join(analysis_dir, "vary_N.csv"))
-    vary_phi = pd.read_csv(os.path.join(analysis_dir, "vary_phi.csv"))
+    curves, crossings, points = load_summary(summary_dir)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2))
 
-    n_reps = int(vary_N.num_replicates.iloc[0])
-    phi_N = float(vary_N.phi_min.iloc[0])
-    N_phi = int(vary_phi.N.iloc[0])
+    res_N = crossing_panel_from_summary(
+        axes[0], curves, crossings, points, sweep="split_vary_N",
+        cmap=CMAP_N, cbar_label=r"$N$", target=target)
+    res_phi = crossing_panel_from_summary(
+        axes[1], curves, crossings, points, sweep="split_vary_phi",
+        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
 
-    # Report L_eff, not the requested L. Loci that are monomorphic in a subsample are
-    # dropped, and how many that is depends on N: the realized raw count runs 12.6k at
-    # N = 100 to 20k at N = 1000, so quoting the requested 20k would imply the sweep held
-    # something fixed that it did not. L_eff is what the theory uses and is genuinely flat
-    # across both sweeps (2.0% and 0.5% spread), because the dropped loci are the ones with
-    # negligible p(1-p) that barely enter the participation ratio in the first place.
-    L_eff_N = vary_N.L_eff.median()
-    L_eff_phi = vary_phi.L_eff.median()
-
-    panel(axes[0], vary_N, "N", CMAP_N, r"$N$",
-          rf"varying $N$  ($\phi={phi_N:g}$, $L_{{\mathrm{{eff}}}}\approx{L_eff_N:.0f}$)")
-    panel(axes[1], vary_phi, "phi_min", CMAP_PHI, r"$\phi$",
-          rf"varying $\phi$  ($N={N_phi}$, $L_{{\mathrm{{eff}}}}\approx{L_eff_phi:.0f}$)")
-
-    # One shared legend for the encoding, since colour is already spent on the sweep.
-    axes[0].plot([], [], "-", color="0.35", linewidth=1.4, label="BBP prediction")
-    axes[0].scatter([], [], s=11, facecolors="none", edgecolors="0.35", linewidths=0.9,
-                    label=f"simulation (median of {n_reps})")
-    axes[0].legend(loc="upper left", fontsize=9, frameon=False)
+    for ax in axes:
+        ax.set_xlabel(r"$F_{ST}$")
+    axes[0].set_title(r"varying $N$  ($\phi=0.5$)")
+    axes[1].set_title(r"varying $\phi$  ($N=200$)")
+    encoding_legend(axes[0], target=target)
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,
@@ -112,6 +75,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     fig.savefig(out, bbox_inches="tight")
     fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
     print(f"wrote {out}")
+    print(crossing_table(res_N, "N", "Fst"))
+    print(crossing_table(res_phi, "phi", "Fst"))
     return fig
 
 

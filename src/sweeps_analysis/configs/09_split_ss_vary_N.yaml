@@ -13,13 +13,20 @@ fixed:
   L_polymorphic: false
 
 sampling:
+  # n-per-deme-B on a linear grid. The old [2,4,8,16,32,64] lost its top level: at
+  # phi = 0.5, n_A = n_per_deme_B * K^2, so n=64 needs 5184 samples from A but only 5000
+  # were simulated, and the model skipped it. Every value here stays under that cap
+  # (n=60 needs 4860), so all six levels are measured.
   fixed: {phi: 0.5}
   vary:
     param: n_per_deme_B
-    values: [2, 4, 8, 16, 32, 64]
+    values: [10, 20, 30, 40, 50, 60]
 
 cluster:
   job_name: sw_splitss_N
-  time: "03:00:00"   # phi=0.5 means n_A = n_per_deme_B * K^2, so n=64 gives N=10368 --
-  mem: 8G            # the largest N in any sweep, and select_by_overlap needs the full
-  cpus_per_task: 1   # eigendecomposition rather than a few leading vectors
+  # The old grid measured 7 min / 1.37G peak per task. This grid carries ~12x the N^3
+  # work (largest cell N=9720 vs 5184), projecting ~80 min; 3h leaves headroom. Peak is
+  # the N x L subsample (0.39G) plus the N x N GRM (0.76G) plus eigh workspace.
+  time: "03:00:00"
+  mem: 6G
+  cpus_per_task: 1

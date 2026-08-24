@@ -17,7 +17,12 @@ fixed:
                          # a full-width slice of a 4 GB .npy
 
 sampling:
-  fixed: {phi_sister: 0.05}
+  # Each sister at 20% of N, so H = 0.20 throughout. Raised from 0.05: at H = 0.05 the
+  # exact nu tops out at 1.67 across the whole Fst range, so every curve plateaued near
+  # cos^2 = 0.78 and never reached the 0.9 detection target -- the sweep had no crossing
+  # to report. nu scales linearly in H, so 0.20 lifts nu_max to ~6.7 and puts the phase
+  # transition inside the grid, which is the point of the figure.
+  fixed: {phi_sister: 0.20}
   vary:
     param: N
     values: [200, 300, 400, 500, 600, 700, 800, 900, 1000]

@@ -22,7 +22,9 @@ color by.
 Outputs (results/analysis/RecentSpatialDemography):
     pc.csv     one row per sample: m_label, m, deme_row, deme_col (NaN for A),
                pc1, pc2, pc3 -- the literal leading three sample eigenvectors by
-               eigenvalue rank, not axes located by overlap
+               eigenvalue rank, not axes located by overlap. PC2/PC3 are rotated onto
+               the grid's (col, row) axes by procrustes, so the scatter's orientation
+               matches panel A's colors
     meta.csv   one row per m_label: m, M, nu_1 (theoretical leading spatial eigenvalue),
                t_split (split time in generations, used by the schematic panel),
                cos (mean principal cosine between the PC2/PC3 pair and the
@@ -37,9 +39,11 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
+from scipy.linalg import orthogonal_procrustes
+
 from pc_recovery import (load_simulations, principal_cosines, sample_eigenvectors,
                          subsample, SIMULATION_ROOT)
-from split_stepping_stone_theory import within_B_F_hat
+from split_stepping_stone_theory import equilibrium_B_axes, within_B_F_hat
 from sweeps import ANALYSIS_ROOT
 
 DEFAULT_NAME = "RecentSpatialDemography"
@@ -50,12 +54,37 @@ DEFAULT_L = 10000        # ~11.6k loci still segregate at N=500; 20k were simula
 
 
 def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
-    """Theoretical spatial pair lifted to [A, B_00, ..., B_(K-1)(K-1)] sample space."""
-    nu, V_pop = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
-    leading = V_pop[:, :2]
+    """
+    Theoretical spatial pair lifted to [A, B_00, ..., B_(K-1)(K-1)] sample space.
+
+    The pair is the equilibrium 2D stepping-stone one; only nu stays on the transient
+    phase-type solve. See split_stepping_stone_theory.equilibrium_B_axes.
+    """
+    nu, _ = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
+    leading, _ = equilibrium_B_axes(K, n_per_deme_B)
     n_B = np.full(K * K, n_per_deme_B)
     lifted_B = np.repeat(leading / np.sqrt(n_B)[:, None], n_B, axis=0)
     return np.vstack([np.zeros((n_A, 2)), lifted_B]), nu[:2]
+
+
+def grid_axes(K, n_A, n_per_deme_B):
+    """
+    The (col, row) grid coordinates of every sample, as a 2-column orthonormal basis --
+    the procrustes target that orients PC2/PC3 to the schematic's colors.
+
+    spatial_axis()'s V_theory cannot serve as this target: its two columns come out of
+    an eigendecomposition (equilibrium_B_axes'), whose order and sign within the
+    degenerate pair are arbitrary, so aligning to it leaves the scatter rotated or mirrored relative to
+    the grid. Column varies along x and row along y with row increasing upwards, matching
+    panel A, which draws row r at y=r -- so row 0 (blue/red) is the BOTTOM edge and row
+    K-1 (green/yellow) the top. Both axes are centred so A's zero rows do not bias the fit.
+    """
+    idx = np.arange(K * K)
+    col = np.repeat(idx % K, n_per_deme_B).astype(float)
+    row = np.repeat(idx // K, n_per_deme_B).astype(float)
+    B = np.column_stack([col - col.mean(), row - row.mean()])
+    V = np.vstack([np.zeros((n_A, 2)), B])
+    return V / np.linalg.norm(V, axis=0, keepdims=True)
 
 
 def pick_m_rows(params, nu_1_per_row):
@@ -131,6 +160,12 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
                         L_polymorphic=True)
         pc = sample_eigenvectors(sub, [0, 1, 2])   # literal PC1, PC2, PC3 by eigenvalue
         cos = float(principal_cosines(V_theory, pc[:, 1:]).mean())
+        # Rotate the PC2/PC3 pair onto the grid's (col, row) axes. The pair spans a
+        # degenerate subspace, so any rotation of it is an equally valid pair of sample
+        # eigenvectors -- this picks the one whose orientation matches the schematic,
+        # leaving PC1 and the reported cos (rotation-invariant) untouched.
+        R = orthogonal_procrustes(pc[:, 1:], grid_axes(K, n_A, n_per_deme_B))[0]
+        pc = np.column_stack([pc[:, 0], pc[:, 1:] @ R])
         meta_rows[-1]["cos"] = cos
         if verbose:
             print(f"{label}: m={m:.4e}, M={M:.3f}, nu_1={nu[0]:.4f}, overlap={cos:.3f}")

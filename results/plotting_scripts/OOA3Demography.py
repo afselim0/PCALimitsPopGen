@@ -165,7 +165,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
             d = pc1[(pc1.label == label) & (pc1.phi == phi)]
             overlap = panel_pc(axes[i, j], d)
             axes[i, j].set_title(rf'$\phi_1=\phi_2={phi:g}$' + '\n' +
-                                 rf'$|\langle u_1,\hat{{u}}_1\rangle|={overlap:.3f}$')
+                                 f'cosine similarity={overlap:.3f}')
 
     # axes[0, 1].legend(loc='upper right', fontsize=8, frameon=False, markerscale=2)
 

@@ -178,6 +178,7 @@ def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TA
 def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                                 cmap=None, cbar_label="", target=DEFAULT_TARGET,
                                 levels=None, show_points=True, show_theory_curve=False,
+                                show_theory_crossing=True,
                                 legend_title=None, legend_loc=None,
                                 legend_ncol=1, show_legend=True, **_ignored):
     """
@@ -196,6 +197,9 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
         cbar_label: used as the legend title (kept under its old name so the figure scripts
             need no edit).
         show_theory_curve: also draw the continuous theoretical curve, not just its crossing.
+        show_theory_crossing: draw the dashed vertical line at the theoretical crossing.
+            Off for the panels where the theory is not the point being made; the number is
+            still returned and printed in the crossings table either way.
 
     Returns the per-curve crossing rows as a list of dicts.
     """
@@ -243,7 +247,7 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
             # Theory drawn only where the fit also reaches the target: a lone dashed line
             # reads as a detection point the data never supports. The number is in the
             # table either way.
-            if np.isfinite(theory):
+            if show_theory_crossing and np.isfinite(theory):
                 ax.axvline(theory, color=color, **THEORY_VLINE_KW)
 
         out.append(dict(level=level, crossing=crossing,
@@ -438,23 +442,34 @@ def peak_table(results, level_name, x_name):
     return "peak of the fitted curve\n" + "\n".join(lines)
 
 
-def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False):
+def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False,
+                    show_theory_crossing=True, show_band=True):
     """
     Key for what the marks mean on a crossing panel, beside the per-curve legend.
 
     force_loc keeps `loc` exactly as given instead of auto-placing opposite the curve
     legend -- needed where the auto choice would land the key on the curves themselves.
+    show_theory_crossing must match what the panel drew, or the key describes a line that
+    is not on it. show_band drops the band swatch where the band is too narrow on the page
+    to be worth a key entry.
     """
     handles = [
         Line2D([], [], color="0.35", linewidth=1.7, label="monotonic spline fit"),
-        Patch(facecolor="0.35", alpha=0.25, edgecolor="none", label="99% confidence band"),
+    ]
+    if show_band:
+        handles.append(
+            Patch(facecolor="0.35", alpha=0.25, edgecolor="none",
+                  label="99% confidence band"))
+    handles += [
         Line2D([], [], color="0.35",
                label=rf"measured $\langle\hat u,u\rangle^2={target:g}$",
                **CROSS_MARKER_KW),
-        Line2D([], [], color="0.35",
-               label=rf"theoretical $\langle\hat u,u\rangle^2={target:g}$",
-               **THEORY_VLINE_KW),
     ]
+    if show_theory_crossing:
+        handles.append(
+            Line2D([], [], color="0.35",
+                   label=rf"theoretical $\langle\hat u,u\rangle^2={target:g}$",
+                   **THEORY_VLINE_KW))
     _add_second_legend(ax, handles, loc, force_loc=force_loc)
 
 

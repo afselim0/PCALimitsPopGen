@@ -68,7 +68,7 @@ def panel_schematic(ax, K, t_split):
     PC panels, plus one large circle for A, both descending from a grey ancestral circle
     via a horizontal bar with a downward arrow over each descendant."""
     grid_span = K - 1
-    x0 = 2.6  # grid's left edge, leaving room for A on the left
+    x0 = 3.4  # grid's left edge, leaving room for A on the left
     for r in range(K):
         for c in range(K):
             if c + 1 < K:
@@ -141,7 +141,7 @@ def panel_pc1(ax, d, K, title):
     ax.set_title(title, pad=6)
 
 
-def panel_pc(ax, d, K):
+def panel_pc(ax, d, K, title=None):
     is_A = d.deme_row.isna().values
     ax.scatter(d.pc2[is_A], d.pc3[is_A], s=4, color=COLOR_OTHER, alpha=0.6,
               edgecolors="none", zorder=1)
@@ -150,6 +150,8 @@ def panel_pc(ax, d, K):
     ax.scatter(dB.pc2, dB.pc3, s=6, c=c, edgecolors="none", zorder=2)
     ax.set_xlabel("PC2")
     ax.set_ylabel("PC3")
+    if title:
+        ax.set_title(title, pad=6)
 
 
 def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
@@ -172,8 +174,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         cos = float(meta.loc[label, "cos"])
         d = pc[pc.label == label]
         ax_top = fig.add_subplot(gs[0, j])
-        panel_pc1(ax_top, d, K, rf"{label}  ($M={M:.2g}$, overlap$={cos:.2f}$)")
-        panel_pc(fig.add_subplot(gs[1, j]), d, K)
+        panel_pc1(ax_top, d, K, rf"$M={M:.2g}$")
+        panel_pc(fig.add_subplot(gs[1, j]), d, K,
+                 rf"cosine similarity $={cos:.2f}$")
         letter_axes.append(ax_top)
 
     for ax, letter in zip(letter_axes, "ABCD"):

@@ -12,6 +12,8 @@ Policies (see models/__init__.py for why these are explicit rather than defaulte
                     leading eigenvalue of the full A+B system once A carries a large sample
                     share -- at phi=0.5, K=9 it is rank 0-1, but at small phi another axis
                     outranks it -- so it is located by overlap rather than assumed to lead.
+    target axis     the equilibrium 2D stepping-stone spatial pair (equilibrium_B_axes),
+                    fixed across the whole M sweep
     theory route    flat, with nu from within_B_F_hat's sparse phase-type solve
     replicate loop  pc_recovery
 
@@ -25,7 +27,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "analysis"))  # src/analysis/
 from pc_recovery import analytical_cosine
-from split_stepping_stone_theory import within_B_F_hat
+from split_stepping_stone_theory import equilibrium_B_axes, within_B_F_hat
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
@@ -75,9 +77,12 @@ def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
     The theoretical (1,0)/(0,1) spatial pair, lifted to full [A, B_00, ...] sample space:
     zero on A's block (A carries none of the spatial signal), the population-space pair
     spread per-deme on B's block. Ported from src/analysis/RecentSpatialOverlapVsM.
+
+    The pair is the equilibrium 2D stepping-stone one; only nu stays on the transient
+    phase-type solve. See split_stepping_stone_theory.equilibrium_B_axes.
     """
-    nu, V_pop = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
-    leading = V_pop[:, :2]
+    nu, _ = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
+    leading, _ = equilibrium_B_axes(K, n_per_deme_B)
     n_B = np.full(K * K, n_per_deme_B)
     lifted_B = np.repeat(leading / np.sqrt(n_B)[:, None], n_B, axis=0)
     V_theory = np.vstack([np.zeros((n_A, 2)), lifted_B])

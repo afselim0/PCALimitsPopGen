@@ -11,9 +11,11 @@ Columns are the three sampling fractions phi in [0.2, 0.4, 0.6]; rows are
     row 1  the 1D sampling scheme: a chain of K circles connected by the migration graph,
            colored by chain position (viridis), sampled demes at full alpha and unsampled
            faded
-    row 2  1D PC1 for that scheme, colored the same way
+    row 2  1D PC1 for that scheme, colored the same way, titled with its cosine
+           similarity to the closed-form spatial axis
     row 3  the 2D sampling scheme: a K x K grid, colored by grid position
-    row 4  2D PC1 vs PC2 for that scheme, on a square panel
+    row 4  2D PC1 vs PC2 for that scheme, on a square panel, titled with the mean
+           principal cosine to the closed-form degenerate pair
 
 Colors: 1D uses viridis along the chain; 2D uses the bivariate (row, col) colormap shared
 with SteppingStoneEigenvectorShapes and RecentSpatialDemography, so grid position maps to
@@ -141,7 +143,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     # 9x9 grid is square. Anything taller just adds dead space around them.
     fig = plt.figure(figsize=(11.0, 10.5))
     outer = fig.add_gridspec(2, 1, height_ratios=[0.44, 2.0], hspace=0.32)
-    gs_1d = outer[0].subgridspec(2, len(phis), height_ratios=[0.14, 0.30], hspace=0.05)
+    # hspace on the 1D section has to clear the PC row's own title, which sits between the
+    # (very flat) chain schematic and the scatter below it.
+    gs_1d = outer[0].subgridspec(2, len(phis), height_ratios=[0.14, 0.30], hspace=0.9)
     gs_2d = outer[1].subgridspec(2, len(phis), height_ratios=[1.0, 1.0], hspace=0.20)
     axes = np.array([[fig.add_subplot(gs_1d[0, j]) for j in range(len(phis))],
                      [fig.add_subplot(gs_1d[1, j]) for j in range(len(phis))],
@@ -159,6 +163,11 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         scheme_2d(axes[2, j], d2, K_2d)
         pc_panel_2d(axes[3, j], p2, K_2d)
 
+        # How well the PC panel below each scheme actually recovers the spatial axis,
+        # stated on the panel itself so the reader need not consult figure 10.
+        axes[1, j].set_title(rf"cosine similarity $= {p1['cos'].iloc[0]:.2f}$", fontsize=10)
+        axes[3, j].set_title(rf"cosine similarity $= {p2['cos'].iloc[0]:.2f}$", fontsize=10)
+
         # Each section gets its own column titles: the two geometries have different deme
         # counts, so the same phi means a different number of sampled demes in each.
         axes[0, j].set_title(rf"$\phi={phi:g}$  ({int(d1.sampled.sum())}/{K_1d} demes)",
@@ -166,9 +175,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         axes[2, j].set_title(rf"$\phi={phi:g}$  ({int(d2.sampled.sum())}/{K_2d * K_2d} demes)",
                              fontsize=10)
 
-    axes[0, 0].set_ylabel("sampling", fontsize=10)
-    axes[1, 0].set_ylabel("PC1", fontsize=10)
-    axes[2, 0].set_ylabel("sampling", fontsize=10)
+    # axes[0, 0].set_ylabel("sampling", fontsize=10)
+    # axes[1, 0].set_ylabel("PC1", fontsize=10)
+    # axes[2, 0].set_ylabel("sampling", fontsize=10)
 
     M_1d, M_2d = meta.loc[1, "M"], meta.loc[2, "M"]
     _section_title(fig, axes[0, :],

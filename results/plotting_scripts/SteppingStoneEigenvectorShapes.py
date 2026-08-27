@@ -109,7 +109,7 @@ def panel_1d(ax, d, meta_row, K, rng):
     ax.set_ylim(-0.15, 1.15)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_title(rf"$M={meta_row.M:.3g}$, overlap$={meta_row.median_cos:.2f}$")
+    ax.set_title(rf"$M={meta_row.M:.3g}$, cosine similarity$={meta_row.median_cos:.2f}$")
 
 
 def panel_2d(ax, d, meta_row, K):
@@ -118,7 +118,7 @@ def panel_2d(ax, d, meta_row, K):
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
     ax.set_aspect("equal", adjustable="datalim")
-    ax.set_title(rf"$M={meta_row.M:.3g}$, overlap$={meta_row.median_cos:.2f}$")
+    ax.set_title(rf"$M={meta_row.M:.3g}$, cosine similarity$={meta_row.median_cos:.2f}$")
 
 
 def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):

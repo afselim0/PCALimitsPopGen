@@ -206,6 +206,58 @@ def subsampled_structure_eigenvalues(K, M, n_per_deme, phi, dimension=1,
     return np.full(k, float(np.median(vals)) * M_ref / M)
 
 
+def strided_demes(K, p, dimension=1):
+    """
+    Deme indices under uniform dilution: every p-th deme of the chain, or every p-th row
+    AND every p-th column of the grid.
+
+    p = 1 is every deme. Unlike a random subset of the same size, this scheme is fixed by
+    (K, p) alone, so the theoretical axis is a property of the cell rather than of the
+    draw -- which is what lets these sweeps take the ordinary fixed-V_theory path instead
+    of redrawing per replicate.
+    """
+    if p < 1:
+        raise ValueError(f"p must be at least 1, got {p}")
+    idx = np.arange(0, K, p)
+    if dimension == 1:
+        return idx
+    if dimension == 2:
+        return np.sort((idx[:, None] * K + idx[None, :]).ravel())
+    raise ValueError(f"dimension must be 1 or 2, got {dimension}")
+
+
+def strided_structure_eigenvalues(K, M, n_per_deme, p, dimension=1, Ne=100.0):
+    """
+    The leading structure eigenvalue(s) when every p-th deme is sampled.
+
+    nu_k = N / (M K_demes mu_k) is the even-sampling closed form and holds only at p = 1;
+    dropping demes changes both the phi_a weights and which rows of the resistance
+    distance survive, so nu is computed numerically here -- exactly as
+    subsampled_structure_eigenvalues does for random subsets, but with no median over
+    schemes, because the strided subset is deterministic.
+
+    T is built on the sampled demes from the full-lattice resistance distance and the top
+    k eigenvalues of compute_F_hat are returned (k = 1 in 1D, 2 in 2D). nu is exactly
+    proportional to 1/M, so one eigendecomposition at a reference M rescales across a
+    whole M grid. Reproduces the closed form exactly at p = 1.
+
+    In 2D the leading pair is degenerate only when the retained rows sit symmetrically
+    about the lattice centre; K = 9, p = 3 keeps {0, 3, 6}, which does not, and the pair
+    splits (nu ~ 49 against 43 at M = 1). The two values are returned as they come rather
+    than averaged, and the caller reduces them the way it reduces any structure pair.
+    """
+    k = 1 if dimension == 1 else 2
+    demes = strided_demes(K, p, dimension)
+    if len(demes) < k + 1:
+        raise ValueError(f"p={p} leaves only {len(demes)} demes, too few for {k} axes")
+
+    M_ref = 1.0
+    T = _lattice_T(K, dimension, Ne, M_ref)[np.ix_(demes, demes)]
+    n = np.full(len(demes), float(n_per_deme))
+    w = np.sort(np.linalg.eigvalsh(compute_F_hat(T, n)))[::-1]
+    return w[:k] * M_ref / M
+
+
 def full_spectrum(K, M, n_per_deme, dimension=1):
     """
     Structure eigenvalues followed by the N - K_demes floor levels.

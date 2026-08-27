@@ -15,9 +15,11 @@ fraction-of-demes-sampled phi in SteppingStoneRandomSampling, which is a differe
 sweep entirely (every deme is always sampled here; phi only trades off n_A vs the
 B block's total).
 
-The target axis is the (1,0)/(0,1) spatial pair from
-split_stepping_stone_theory.within_B_F_hat -- population-space, restricted to B, then
-lifted to sample space with a zero block for A. This pair is not reliably the leading
+The target axis is the (1,0)/(0,1) spatial pair of the EQUILIBRIUM 2D stepping-stone
+model (split_stepping_stone_theory.equilibrium_B_axes) -- population-space, restricted to
+B, then lifted to sample space with a zero block for A. Its eigenvalue nu still comes from
+within_B_F_hat's transient phase-type solve, which is the one this recent-split demography
+has; only the eigenvector is the equilibrium one. This pair is not reliably the leading
 eigenvalue of the *full* A+B system once A carries a large sample share (checked
 numerically: at phi=0.5, K=9 it is rank 0-1, but at small phi another axis outranks it),
 so it is located by overlap (pc_recovery.pc_recovery(..., select_by_overlap=True)) as in
@@ -38,7 +40,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from crossing_fit import crossings_table, replicate_rows
 from pc_recovery import load_simulations, pc_recovery, SIMULATION_ROOT
-from split_stepping_stone_theory import within_B_F_hat
+from split_stepping_stone_theory import equilibrium_B_axes, within_B_F_hat
 from sweeps import ANALYSIS_ROOT
 
 DEFAULT_NAME = "RecentSpatialOverlapVsM"
@@ -56,9 +58,15 @@ def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
     The theoretical (1,0)/(0,1) spatial pair, lifted to full [A, B_00, ..., B_(K-1)(K-1)]
     sample space: zero on A's block (A carries none of the spatial signal), the
     population-space pair spread per-deme on B's block.
+
+    The pair is the EQUILIBRIUM 2D stepping-stone one (equilibrium_B_axes), so the axis
+    the overlap is measured against is the same fixed spatial pair at every M rather than
+    a per-M transient solve. The eigenvalue nu stays on within_B_F_hat's phase-type solve,
+    which is the one this recent-split demography actually has -- see equilibrium_B_axes'
+    docstring for why the two are split.
     """
-    nu, V_pop = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
-    leading = V_pop[:, :2]
+    nu, _ = within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B)
+    leading, _ = equilibrium_B_axes(K, n_per_deme_B)
     n_B = np.full(K * K, n_per_deme_B)
     lifted_B = np.repeat(leading / np.sqrt(n_B)[:, None], n_B, axis=0)
     V_theory = np.vstack([np.zeros((n_A, 2)), lifted_B])

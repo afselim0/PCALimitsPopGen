@@ -195,3 +195,51 @@ def within_B_F_hat(K, m, t_split, Ne_ancestral, n_per_deme_B):
     trivial = int(np.argmax(np.abs(psi @ V)))
     keep = [j for j in range(K_demes) if j != trivial]
     return w[keep], V[:, keep]
+
+
+@lru_cache(maxsize=None)
+def equilibrium_B_axes(K, n_per_deme_B):
+    """
+    B's leading spatial pair from the EQUILIBRIUM 2D stepping-stone model, in
+    population space -- the (1,0)/(0,1) cosine modes of the K x K grid.
+
+    This is the axis the overlap is measured against, in place of within_B_F_hat's
+    transient pair. The equilibrium grid's eigenvectors do not depend on m (m enters
+    stepping_stone_T only as an overall 1/m scale on F_2, which cancels out of F_hat's
+    eigenvectors), nor on t_split, so the target is one fixed pair for the whole M
+    sweep rather than a per-M solve.
+
+    Using it does not throw away the recent split: the transient and equilibrium pairs
+    span nearly the same subspace at K=9 (principal cosines 0.9999 at the strong-migration
+    end, falling only to 0.979 at the weakest M simulated), so the measured overlap is
+    barely affected. What differs sharply is the *eigenvalue*: the equilibrium closed form
+    has no t_split ceiling on how much spatial structure can accumulate, so it runs away at
+    small M (nu = 134 against the transient 10.3 at M = 0.247). Eigenvalues therefore stay
+    on within_B_F_hat's phase-type solve; only the eigenvectors come from here.
+
+    Cached: the result depends only on (K, n_per_deme_B), so a sweep over M reuses one
+    eigendecomposition rather than rebuilding T and re-solving per point. Under even
+    sampling the eigenvectors do not actually move with n_per_deme_B either (checked: cos
+    = 1 between n = 4 and n = 17); it is kept as an argument because it sets nu_eq's scale
+    and keeps the signature parallel to within_B_F_hat.
+
+    Returns (V, nu_eq): the (K^2, 2) population-space pair and its equilibrium
+    eigenvalues, the latter for reference only. Treat both as read-only, as the cache
+    hands back the same arrays to every caller.
+    """
+    # Imported here rather than at module scope: stepping_stone_detection pulls in
+    # pc_recovery and tqdm, which this module otherwise does not need.
+    from stepping_stone_detection import stepping_stone_T
+
+    n = np.full(K * K, n_per_deme_B)
+    # m and Ne only scale T here; the eigenvectors are invariant to both.
+    T_eq = stepping_stone_T(K, 1.0, 1.0, 2)
+    F_hat = compute_F_hat(T_eq, n)
+    w, V = np.linalg.eigh(F_hat)
+    order = np.argsort(w)[::-1]
+    w, V = w[order], V[:, order]
+
+    psi = np.sqrt(n / n.sum())
+    trivial = int(np.argmax(np.abs(psi @ V)))
+    keep = [j for j in range(K * K) if j != trivial]
+    return V[:, keep][:, :2], w[keep][:2]

@@ -22,7 +22,9 @@ SteppingStoneRandomSampling.py / figure 10).
 
 Outputs (results/analysis/SteppingStoneRandomDemo):
     sampled_demes.csv   one row per (dimension, phi, deme): whether it was sampled
-    pcs.csv             one row per (dimension, phi, sample): deme, PC1 (, PC2)
+    pcs.csv             one row per (dimension, phi, sample): deme, PC1 (, PC2), and
+                        `cos`, the cosine similarity of that panel's recovered PC(s)
+                        with the closed-form axis / axes (constant within a panel)
     meta.csv            one row per dimension: simID, m, M, M_c, K
 """
 import argparse
@@ -34,7 +36,8 @@ import pandas as pd
 from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
-from pc_recovery import load_simulations, subsample, sample_eigenvectors, SIMULATION_ROOT
+from pc_recovery import (load_simulations, subsample, sample_eigenvectors,
+                         principal_cosines, SIMULATION_ROOT)
 from sweeps import ANALYSIS_ROOT
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -87,11 +90,13 @@ def demo_1d(Z, K, n_per_deme, phi, L, rng):
     # backwards along the chain and the colors mirrored relative to the schematic.
     u_theory = -closed_form_eigenvector_1d(1, K, n_per_deme)
     u_sub = u_theory[np.repeat(row_mask, n_per_deme)]
+    u_sub = u_sub / np.linalg.norm(u_sub)
     pc1 = pc1 if pc1 @ u_sub >= 0 else -pc1
+    cos = float(principal_cosines(u_sub[:, None], pc1[:, None])[0])
 
     pc_df = pd.DataFrame(dict(deme=np.repeat(demes, n_per_deme), pc1=pc1))
     deme_df = pd.DataFrame(dict(deme=np.arange(K), sampled=row_mask))
-    return deme_df, pc_df
+    return deme_df, pc_df, cos
 
 
 def demo_2d(Z, K, n_per_deme, phi, L, rng):
@@ -112,16 +117,19 @@ def demo_2d(Z, K, n_per_deme, phi, L, rng):
     V_theory = np.column_stack([
         -closed_form_eigenvector_2d(0, 1, K, n_per_deme)[sample_mask],
         -closed_form_eigenvector_2d(1, 0, K, n_per_deme)[sample_mask]])
-    V_theory = V_theory / np.linalg.norm(V_theory, axis=0, keepdims=True)
+    # Restricting to a deme subset destroys the orthonormality the closed forms have on
+    # the full lattice, so re-orthonormalize before comparing subspaces.
+    V_theory = np.linalg.qr(V_theory)[0]
     R = orthogonal_procrustes(V_s, V_theory)[0]
     V_aligned = V_s @ R
+    cos = float(principal_cosines(V_theory, V_s).mean())
 
     deme = np.repeat(demes, n_per_deme)
     pc_df = pd.DataFrame(dict(deme=deme, row=deme // K, col=deme % K,
                               pc1=V_aligned[:, 0], pc2=V_aligned[:, 1]))
     deme_df = pd.DataFrame(dict(deme=np.arange(K_demes), row=np.arange(K_demes) // K,
                                 col=np.arange(K_demes) % K, sampled=row_mask))
-    return deme_df, pc_df
+    return deme_df, pc_df, cos
 
 
 def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, phi_values=PHI_VALUES, L=None,
@@ -148,11 +156,14 @@ def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, phi_values=PHI_VALUES, L=None,
 
         for phi in phi_values:
             rng = np.random.default_rng([seed, dimension, int(round(phi * 100))])
-            deme_df, pc_df = demo_func(arrays[i], K, n_per_deme, phi, L_cell, rng)
+            deme_df, pc_df, cos = demo_func(arrays[i], K, n_per_deme, phi, L_cell, rng)
             deme_df["dimension"], deme_df["phi"] = dimension, phi
             pc_df["dimension"], pc_df["phi"] = dimension, phi
+            pc_df["cos"] = cos
             deme_rows.append(deme_df)
             pc_rows.append(pc_df)
+            if verbose:
+                print(f"  phi={phi:g}: cos={cos:.3f}")
 
     pd.concat(deme_rows, ignore_index=True).to_csv(
         os.path.join(outdir, "sampled_demes.csv"), index=False)

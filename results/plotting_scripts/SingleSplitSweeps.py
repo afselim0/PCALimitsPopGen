@@ -63,7 +63,8 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
         ax.set_xlabel(r"$F_{ST}$")
     axes[0].set_title(r"varying $N$  ($\phi=0.5$)")
     axes[1].set_title(r"varying $\phi$  ($N=200$)")
-    encoding_legend(axes[0], target=target)
+    encoding_legend(axes[0], target=target, loc="upper left", force_loc=True,
+                    show_band=False)
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,

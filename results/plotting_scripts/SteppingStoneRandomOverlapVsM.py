@@ -11,8 +11,8 @@ transition curve increasing. That reciprocal is applied in the analysis, not her
 The fit (a monotone shape-constrained scam smooth), its 95% band and the theoretical
 crossing are computed upstream by src/sweeps_analysis/summarise.py and read here as columns
 -- this script draws, it does not fit, and it holds no theory of its own. A filled marker
-sits on the curve where it reaches squared overlap 0.9, a dashed vertical line where theory
-reaches it.
+sits on the curve where it reaches squared overlap 0.9; the theoretical crossing goes to the
+printed table, not onto the panel.
 
 2D compares the degenerate (1,0)/(0,1) pair as a subspace (procrustes-aligned principal
 angles), since no canonical basis exists inside a degenerate eigenspace.
@@ -48,12 +48,13 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     results = []
     for ax, (sweep, label) in zip(axes, SWEEPS):
         res = crossing_panel_from_summary(ax, curves, crossings, points, sweep=sweep,
-                                          cmap=CMAP, cbar_label=r"fraction of demes sampled", target=target)
+                                          cmap=CMAP, cbar_label=r"fraction of demes sampled", target=target,
+                                          show_theory_crossing=False)
         ax.set_xlabel(r"$1/M$")
         ax.set_title(label)
         results.append(res)
 
-    encoding_legend(axes[0], target=target, loc="lower right")
+    encoding_legend(axes[0], target=target, loc="lower right", show_theory_crossing=False)
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
                 fontsize=13, fontweight="bold", va="top")

@@ -1,9 +1,15 @@
 """
 1D and 2D stepping stone: PC recovery against 1/M, under even or random deme sampling.
 
-One module covers four configs because the demography and the theory are identical across
+One module covers six configs because the demography and the theory are identical across
 them; only the sampling differs. `dimension` and the sampling parameter come from the
-config.
+config: n-per-deme at full coverage, a random fraction of demes, or `deme_stride`, which
+keeps every p-th deme at a FIXED total N (configs 11 and 12).
+
+Uniform dilution (`deme_stride`) is deterministic given (K, p), so unlike the random
+fraction it needs no per-replicate redraw: the axis is a property of the cell. Total N is
+held fixed across p, so the samples freed by dropping demes are redistributed over the
+demes that remain -- the sweep isolates spatial coverage from sample size.
 
 Policies (see models/__init__.py for why these are explicit rather than defaulted):
     axis location   fixed rank [0] in 1D; [0, 1] in 2D -- the (1,0)/(0,1) pair is exactly
@@ -15,9 +21,10 @@ Policies (see models/__init__.py for why these are explicit rather than defaulte
                     not strictly the right one (see threshold_and_overlap's note on
                     spectrum_psi) -- that question is open and separate from which nu is
                     fed in.
-    nu              closed form N/(M K_demes mu_k) only at deme_fraction == 1; below that
-                    the median over random deme subsets, see
-                    stepping_stone_grid.subsampled_structure_eigenvalues.
+    nu              closed form N/(M K_demes mu_k) only when every deme is sampled;
+                    under a random fraction the median over random deme subsets, and
+                    under uniform dilution the exact numeric value for that stride --
+                    see stepping_stone_grid.{subsampled,strided}_structure_eigenvalues.
     replicate loop  pc_recovery for even sampling; cell_replicates for random sampling,
                     where phi selects a fresh deme subset per replicate and the
                     theoretical axis therefore changes per replicate.
@@ -45,6 +52,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "simulations"))  # src/simulations/
 from stepping_stone_grid import (closed_form_eigenvector_1d, closed_form_eigenvector_2d,
                                  closed_form_spectrum, num_demes,
+                                 strided_demes, strided_structure_eigenvalues,
                                  subsampled_structure_eigenvalues)
 
 SIM_PARAM = "invM"
@@ -99,8 +107,25 @@ def prepare(cfg, sim_row):
             "K_demes": num_demes(K, dimension)}
 
 
+def stride_n_per_deme(K, p, dimension, N_total):
+    """n-per-deme placing N_total samples evenly over the demes a stride p retains.
+
+    Floor, not round: the cell must never ask for more samples than were simulated per
+    deme, and a fixed N is the point of the sweep only up to this integer division --
+    the realised N is recorded per cell as `N`.
+    """
+    n_demes = len(strided_demes(K, p, dimension))
+    return max(int(N_total // n_demes), 1)
+
+
 def designs(cfg):
-    """[(level, design_dict), ...] -- varying either n-per-deme or the deme fraction."""
+    """[(level, design_dict), ...] -- varying n-per-deme, the deme fraction, or the stride.
+
+    Under `deme_stride` n-per-deme is not a free parameter: it is whatever spreads the
+    config's fixed N_total over the demes that stride retains, so it is derived here
+    rather than read from the config. K comes from `fixed.K` because designs() is built
+    once for the whole sweep, before any simulation row is in hand.
+    """
     vary = cfg["sampling"]["vary"]
     fixed = cfg["sampling"]["fixed"]
     param, values = vary["param"], vary["values"]
@@ -111,8 +136,64 @@ def designs(cfg):
         n_per = int(fixed["n_per_deme"])
         return [(float(v), {"n_per_deme": n_per, "deme_fraction": float(v)})
                 for v in values]
-    raise ValueError(f"stepping_stone: cannot vary {param!r}; expected 'n_per_deme' or "
-                     f"'deme_fraction'")
+    if param == "deme_stride":
+        K = int(cfg["fixed"]["K"])
+        dimension = int(cfg["fixed"]["dimension"])
+        N_total = int(fixed["N_total"])
+        return [(int(v), {"deme_stride": int(v), "N_total": N_total,
+                          "n_per_deme": stride_n_per_deme(K, int(v), dimension, N_total)})
+                for v in values]
+    raise ValueError(f"stepping_stone: cannot vary {param!r}; expected 'n_per_deme', "
+                     f"'deme_fraction' or 'deme_stride'")
+
+
+def _stride_axes(ctx, design, sim_row, cfg):
+    """
+    The spec for one uniform-dilution cell: every p-th deme, n_per_deme derived from N_total.
+
+    The axis is the full-lattice closed-form eigenvector RESTRICTED to the sampled demes
+    (true_axis_restricted), the same convention the random-fraction path uses: the axis
+    being tested is the one the full lattice defines, and the question is how well a
+    diluted sample recovers it. nu is the exact numeric value for this stride, not the
+    even-sampling closed form, which holds only at p = 1.
+
+    2D caveat. The (1,0)/(0,1) pair is degenerate only when the retained rows sit
+    symmetrically about the lattice centre. At K = 9 a stride of 3 keeps {0, 3, 6}, which
+    does not, and the pair splits (nu ~ 49 against 43 at M = 1); the restricted closed-form
+    pair then reaches principal cosines of about (0.99, 0.83) with the numeric leading
+    pair rather than (1, 1). The comparison stays a subspace comparison regardless, and
+    the reduction of nu to a single number is the same mean used everywhere else.
+    """
+    K, dimension, M = ctx["K"], ctx["dimension"], ctx["M"]
+    K_demes = ctx["K_demes"]
+    p = int(design["deme_stride"])
+    n_per = int(design["n_per_deme"])
+    k = k_lead(cfg)
+
+    demes = strided_demes(K, p, dimension)
+    n = np.zeros(K_demes, dtype=int)
+    n[demes] = n_per
+
+    nu = strided_structure_eigenvalues(K, M, n_per, p, dimension, Ne=float(sim_row["Ne"]))
+    V_theory = true_axis_restricted(K, dimension, n_per, demes, K_demes)
+    # principal_cosines is the SVD of V_theory^T V_sample and needs an ORTHONORMAL basis;
+    # restricting the closed forms to a deme subset destroys the orthogonality they have
+    # on the full lattice. At K=9, p=3 the two restricted columns correlate at 0.10, which
+    # would bias the reported cosine, so re-orthonormalize. The span is unchanged, and the
+    # comparison was always a subspace comparison. (1D has one column, so QR only fixes
+    # its sign convention, which principal_cosines takes the absolute value of anyway.)
+    if V_theory.shape[1] > 1:
+        V_theory = np.linalg.qr(V_theory)[0]
+
+    return dict(V_theory=V_theory, nu=nu, n=n, n_available=None,
+                indices=list(range(k)), select_by_overlap=False, eps=None,
+                theory_route="exact_h", per_replicate=False,
+                extra=dict(K=K, K_demes=K_demes, dimension=dimension, M=M,
+                           m=float(sim_row["m"]), Ne=float(sim_row["Ne"]),
+                           n_per_deme=n_per, deme_stride=p,
+                           N_total=int(design["N_total"]),
+                           deme_fraction=len(demes) / K_demes,
+                           n_demes_sampled=int(len(demes)), nu_1=float(nu[0])))
 
 
 def axes(ctx, design, sim_row, cfg):
@@ -120,13 +201,18 @@ def axes(ctx, design, sim_row, cfg):
     The leading structure axis (1D) or degenerate pair (2D).
 
     A deme_fraction below 1 takes the per-replicate path: the axis depends on which demes
-    are drawn, so it cannot be built once here.
+    are drawn, so it cannot be built once here. A deme_stride does not -- the subset is
+    fixed by (K, p) -- so it builds its axis once, like even sampling.
     """
     K, dimension, M = ctx["K"], ctx["dimension"], ctx["M"]
     K_demes = ctx["K_demes"]
     n_per = design["n_per_deme"]
-    frac = design["deme_fraction"]
     k = k_lead(cfg)
+
+    if "deme_stride" in design:
+        return _stride_axes(ctx, design, sim_row, cfg)
+
+    frac = design["deme_fraction"]
 
     _, nu_full, V_full = closed_form_spectrum(K, M, n_per, dimension)
     nu = nu_full[:k]
@@ -250,6 +336,9 @@ def theory_overlap(ctx, design, sim_row, cfg, measured):
     here -- nu really is proportional to 1/M with no pedestal -- but recomputing keeps
     the exact mu_k in the loop instead of inheriting whatever the anchor cell held.
 
+    Under uniform dilution nu comes from strided_structure_eigenvalues, the exact numeric
+    value for the deme set that stride names -- no median, because the set is not random.
+
     That closed form presumes every deme is sampled and is WRONG at deme_fraction < 1,
     where it overstates nu badly (1D, K=25, phi=0.2: 101 against an actual ~18). A
     fraction does not name a scheme, so nu is taken from
@@ -296,10 +385,17 @@ def theory_overlap(ctx, design, sim_row, cfg, measured):
         nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
 
     frac = float(measured.get("deme_fraction", n_demes / K_demes))
+    # A stride names an exact deme set, so nu is the numeric value for that set rather
+    # than the median over random subsets of the same size.
+    stride = measured.get("deme_stride")
+    stride = int(stride) if stride is not None and np.isfinite(stride) else None
+    Ne = float(measured.get("Ne", 100.0))
 
     def overlap(inv_M):
         M = 1.0 / float(inv_M)
-        if frac >= 1.0:
+        if stride is not None:
+            nu_full = strided_structure_eigenvalues(K, M, n_per, stride, dimension, Ne=Ne)
+        elif frac >= 1.0:
             _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
         else:
             nu_full = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)

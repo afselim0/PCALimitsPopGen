@@ -12,3 +12,5 @@ logs/
 results/sweeps/
 results/sweep_summaries/
 slurm_runs/sweeps/
+.csv
+.npz

@@ -190,6 +190,51 @@ def axes(ctx, design, sim_row, cfg):
                            nu_approx=N * harmonic_phi(n) * float(sim_row[SIM_PARAM])))
 
 
+NU_FORM = "analytical_sister"
+
+
+def _n_vector(design):
+    """Per-population sample sizes, from either a recorded cell row or the n vector."""
+    if isinstance(design, dict):
+        n_o = int(design["n_other"])
+        return np.array([n_o, n_o, int(design["n_sister1"]), int(design["n_sister2"])])
+    return np.asarray(design, dtype=int)
+
+
+def theory_context(ctx, design, sim_row, cfg, measured):
+    """
+    The RMT inputs for this cell, with no nu in them.
+
+    phi is the full K = 4 sampling-proportion vector, NOT the harmonic mean H, which is
+    only the curve label. eps is genuinely non-zero here (tau/tau_bar spans 0.81-1.17),
+    which is why the flat threshold is not usable for this model.
+    """
+    n = _n_vector(design)
+    N = int(n.sum())
+    phi = n / N
+    tau = np.diag(ctx["T"])
+    try:
+        return dict(phi=phi, eps=tau / float(np.sum(phi * tau)) - 1.0,
+                    h=measured.get("h"), gamma_raw=float(measured["gamma_raw"]),
+                    mu2=float(measured["mu2"]), delta=float(measured["delta"]),
+                    N=N, L_eff=float(measured["L_eff"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def nu_of_x(ctx, design, sim_row, cfg, measured):
+    """
+    Fst -> nu for the sister axis: nu = eps_0 + (2 N phi_1 phi_2 / s) (tau/tau_bar) Fst,
+    evaluated exactly at each Fst from the coalescent-time matrix.
+
+    Equivalently the appendix's eps_0 + N phi_tilde Fst (1 + eps_0), since
+    tau/tau_bar = 1 + eps_0 and phi_tilde = 2 phi_1 phi_2 / s.
+    """
+    n = _n_vector(design)
+    T = ctx["T"]
+    return lambda fst: analytical_nu(T, n, float(fst))
+
+
 def theory_overlap(ctx, design, sim_row, cfg, measured):
     """
     Fst -> predicted cos^2, computed rather than fitted or rescaled.
@@ -209,34 +254,24 @@ def theory_overlap(ctx, design, sim_row, cfg, measured):
     here is the full sampling-proportion vector, NOT the harmonic mean H, which is only
     the curve label.
     """
-    # design is the recorded cell row when called from the summariser (see split.py).
-    if isinstance(design, dict):
-        n_o = int(design["n_other"])
-        n = np.array([n_o, n_o, int(design["n_sister1"]), int(design["n_sister2"])])
-    else:
-        n = np.asarray(design, dtype=int)
-    N = int(n.sum())
-    phi = n / N
-    tau = np.diag(ctx["T"])
-    eps = tau / float(np.sum(phi * tau)) - 1.0
-
-    gamma_raw = float(measured["gamma_raw"])
-    T = ctx["T"]
-    h = measured.get("h")
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    nu_fn = nu_of_x(ctx, design, sim_row, cfg, measured)
+    if tc is None or nu_fn is None:
+        return None
+    phi, eps, gamma_raw = tc["phi"], tc["eps"], tc["gamma_raw"]
+    h = tc.get("h")
 
     if h is not None and len(np.asarray(h)):
         h = np.asarray(h, dtype=float)
         nu_c = exact_nu_c(phi, eps, h, gamma_raw)
 
         def overlap(fst):
-            return exact_overlap(analytical_nu(T, n, float(fst)), phi, eps, h,
-                                 gamma_raw, nu_c=nu_c)
+            return exact_overlap(nu_fn(fst), phi, eps, h, gamma_raw, nu_c=nu_c)
         return overlap
 
-    mu2, delta = float(measured["mu2"]), float(measured["delta"])
+    mu2, delta = tc["mu2"], tc["delta"]
     nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
 
     def overlap(fst):
-        return approx_overlap(analytical_nu(T, n, float(fst)), phi, eps,
-                              gamma_raw, mu2, delta, nu_c=nu_c)
+        return approx_overlap(nu_fn(fst), phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
     return overlap

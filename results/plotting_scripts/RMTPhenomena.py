@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.transforms import ScaledTranslation
 
+from crossing_panel import save_figure
 from plotting_style import okabe_ito, setup_plotting_style
 
 
@@ -202,10 +203,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
     add_insets(fig, ax_C, pc1)
 
-    os.makedirs(figure_dir, exist_ok=True)
-    out = os.path.join(figure_dir, "RMTPhenomena.pdf")
-    fig.savefig(out, bbox_inches='tight')
-    fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches='tight')
+    out = save_figure(fig, figure_dir, "RMTPhenomena")
     print(f"wrote {out}")
     return fig
 

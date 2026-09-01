@@ -27,6 +27,7 @@ import pandas as pd
 from matplotlib import colors
 from matplotlib.patches import Circle, FancyArrowPatch
 
+from crossing_panel import save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -183,10 +184,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         ax.text(-0.15, 1.06 if ax is ax_schematic else 1.35, letter,
                 transform=ax.transAxes, fontsize=13, fontweight="bold", va="top")
 
-    os.makedirs(figure_dir, exist_ok=True)
-    out = os.path.join(figure_dir, "RecentSpatialDemography.pdf")
-    fig.savefig(out, bbox_inches="tight")
-    fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
+    out = save_figure(fig, figure_dir, "RecentSpatialDemography")
     print(f"wrote {out}")
     return fig
 

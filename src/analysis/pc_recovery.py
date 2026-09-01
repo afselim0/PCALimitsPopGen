@@ -30,7 +30,8 @@ import pandas as pd
 from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
-from utils import compute_sample_covariance, compute_F_hat
+from utils import (compute_sample_covariance, compute_standardized_covariance,
+                   compute_F_hat)
 from threshold_and_overlap import (eta_moments, approx_nu_c, approx_overlap,
                                    exact_nu_c, exact_overlap)
 
@@ -294,7 +295,8 @@ def procrustes_distance(V_theory, V_sample):
     return float(np.linalg.norm(V_theory - V_sample @ R) / np.sqrt(V_theory.shape[1]))
 
 
-def sample_eigenvectors(Z, indices, by_magnitude=False):
+def sample_eigenvectors(Z, indices, by_magnitude=False, standardize=False,
+                        return_eigenvalues=False, bulk_index=None):
     """
     Eigenvectors of the sample GRM at `indices`, 0 = largest eigenvalue.
 
@@ -304,17 +306,38 @@ def sample_eigenvectors(Z, indices, by_magnitude=False):
     lambda would return a floor eigenvector in its place. Rank by magnitude whenever any
     theoretical nu is negative; theoretical_eigenvectors reports the nu so the caller can
     tell, and pc_recovery switches automatically.
+
+    standardize builds the GRM from columns scaled to unit variance instead of raw
+    genotypes (utils.compute_standardized_covariance), which is the same PCA every locus
+    weighted equally rather than by p(1-p).
+
+    return_eigenvalues also returns the eigenvalues at `indices` and, when bulk_index is
+    given, the eigenvalue at that rank -- the top of the bulk, against which a structure
+    eigenvalue's separation is judged. For K subpopulations the K-1 structure eigenvalues
+    occupy ranks 0..K-2 in the ordering used here (the mean-centering zero having been
+    dropped or sorted to the bottom), so the edge is rank K-1, which is the K-TH HIGHEST
+    eigenvalue: the 2nd for a two-population split, the 4th for OOA3's K = 4. (Ranks here
+    are 0-based; the ordinal is 1-based. They name the same eigenvalue.) Returns
+    (V, lambdas, lambda_bulk).
     """
-    G = compute_sample_covariance(Z)
+    G = compute_standardized_covariance(Z) if standardize else compute_sample_covariance(Z)
     w, V = np.linalg.eigh(G)
     order = np.argsort(np.abs(w))[::-1] if by_magnitude else np.argsort(w)[::-1]
     if by_magnitude:
         # Drop the mean-centering zero, which has the smallest magnitude of all.
         order = order[np.abs(w[order]) > 1e-8 * max(np.abs(w).max(), 1.0)]
-    return V[:, order[np.atleast_1d(indices)]]
+    idx = np.atleast_1d(indices)
+    Vsel = V[:, order[idx]]
+    if not return_eigenvalues:
+        return Vsel
+    lam = w[order[idx]]
+    lam_bulk = (float(w[order[bulk_index]])
+                if bulk_index is not None and bulk_index < len(order) else np.nan)
+    return Vsel, lam, lam_bulk
 
 
-def eigenvectors_by_overlap(Z, V_theory):
+def eigenvectors_by_overlap(Z, V_theory, standardize=False,
+                            return_eigenvalues=False, bulk_index=None):
     """
     The sample eigenvector best matching each column of V_theory, located by overlap.
 
@@ -332,8 +355,16 @@ def eigenvectors_by_overlap(Z, V_theory):
     Each theoretical axis is matched to its own argmax, so a permuted or non-contiguous set
     of ranks is handled. Matches are taken greedily and without replacement, which keeps two
     theoretical axes from collapsing onto the same sample eigenvector.
+
+    standardize selects the unit-variance GRM, as in sample_eigenvectors.
+
+    return_eigenvalues also returns the eigenvalues of the eigenvectors actually picked --
+    which is the point of this route: the axis of interest is NOT the largest eigenvalue
+    here, so its eigenvalue can only be known after the match is made. With bulk_index it
+    also returns the eigenvalue at that rank, the top of the bulk. Returns
+    (V, lambdas, lambda_bulk).
     """
-    G = compute_sample_covariance(Z)
+    G = compute_standardized_covariance(Z) if standardize else compute_sample_covariance(Z)
     w, V = np.linalg.eigh(G)
     order = np.argsort(w)[::-1]
     V = V[:, order]
@@ -341,14 +372,22 @@ def eigenvectors_by_overlap(Z, V_theory):
     V_theory = np.atleast_2d(np.asarray(V_theory, dtype=float))
     overlaps = np.abs(V.T @ V_theory)               # (n_candidates, k)
 
-    picked, out = set(), []
+    picked, out, ranks = set(), [], []
     for j in range(V_theory.shape[1]):
         col = overlaps[:, j].copy()
         col[list(picked)] = -1.0
         k = int(np.argmax(col))
         picked.add(k)
         out.append(V[:, k])
-    return np.column_stack(out)
+        ranks.append(k)
+    Vsel = np.column_stack(out)
+    if not return_eigenvalues:
+        return Vsel
+    w_sorted = w[order]
+    lam = np.array([w_sorted[k] for k in ranks], dtype=float)
+    lam_bulk = (float(w_sorted[bulk_index])
+                if bulk_index is not None and bulk_index < len(w_sorted) else np.nan)
+    return Vsel, lam, lam_bulk
 
 
 def support_overlap_floor(V_theory, n, num_candidates=None, num_draws=20000, seed=0):
@@ -546,17 +585,38 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
                          f"indices were requested")
 
     by_magnitude = nu is not None and np.any(np.asarray(nu) < 0)
+    # K subpopulations give K-1 structure eigenvalues at ranks 0..K-2, so the edge is rank
+    # K-1 = the K-th highest eigenvalue (2nd for K=2, 4th for OOA3's K=4) -- the top of the
+    # bulk that a structure eigenvalue has to clear.
+    bulk_index = max(len(n) - 1, 1)
 
-    cos_all, dists, L_effs, L_raws = [], [], [], []
+    cos_all, cos_all_std, dists, L_effs, L_raws = [], [], [], [], []
     mu2s, deltas = [], []
+    lam_all, lam_bulk_all = [], []
     for rep in range(num_replicates):
         rng = np.random.default_rng([seed, rep])
         sub = subsample(Z, n, L, rng, n_available=n_available,
                         L_polymorphic=L_polymorphic)
-        V_s = (eigenvectors_by_overlap(sub, V_theory) if select_by_overlap
-               else sample_eigenvectors(sub, indices, by_magnitude=by_magnitude))
+        V_s, lam, lam_bulk = (
+            eigenvectors_by_overlap(sub, V_theory, return_eigenvalues=True,
+                                    bulk_index=bulk_index) if select_by_overlap
+            else sample_eigenvectors(sub, indices, by_magnitude=by_magnitude,
+                                     return_eigenvalues=True, bulk_index=bulk_index))
         cos_all.append(principal_cosines(V_theory, V_s))
         dists.append(procrustes_distance(V_theory, V_s))
+        lam_all.append(lam)
+        lam_bulk_all.append(lam_bulk)
+
+        # The same subsample and the same theoretical axis, but with every locus weighted
+        # equally instead of by p(1-p). Measuring both off one `sub` is what makes the two
+        # cosines comparable: any difference is attributable to the GRM construction alone,
+        # not to which samples or loci were drawn.
+        V_s_std = (eigenvectors_by_overlap(sub, V_theory, standardize=True)
+                   if select_by_overlap
+                   else sample_eigenvectors(sub, indices, by_magnitude=by_magnitude,
+                                            standardize=True))
+        cos_all_std.append(principal_cosines(V_theory, V_s_std))
+
         L_effs.append(effective_L(sub))
         L_raws.append(sub.shape[1])
         m2, _, dl = locus_moments(sub)
@@ -570,6 +630,18 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
 
     cos_all = np.array(cos_all)                 # (num_replicates, k)
     mean_cos = cos_all.mean(axis=1)             # subspace similarity per replicate
+    cos_all_std = np.array(cos_all_std)
+    mean_cos_std = cos_all_std.mean(axis=1)
+    # The structure eigenvalue actually measured, and the top of the bulk it must clear.
+    # Averaged over the axes of the subspace, matching how the cosine is reduced, so that a
+    # degenerate pair contributes one number rather than an arbitrary split.
+    lam_all = np.array(lam_all, dtype=float)
+    lam_replicates = lam_all.mean(axis=1)
+    lam_bulk_replicates = np.array(lam_bulk_all, dtype=float)
+    # nu_hat = lambda/lambda_bulk - 1 puts the measurement on the same scale as the
+    # theoretical nu, which is defined relative to the floor (see threshold_and_overlap).
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nu_hat_replicates = lam_replicates / lam_bulk_replicates - 1.0
 
     L_eff_med = float(np.median(L_effs))
     L_raw_med = float(np.median(L_raws))
@@ -599,6 +671,19 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         # each replicate, cos_replicates_per_axis the (num_replicates, k) matrix behind it.
         cos_replicates=mean_cos,
         cos_replicates_per_axis=cos_all,
+        # The standardized-GRM measurement, on the same subsamples and the same axis.
+        median_cos_std=float(np.median(mean_cos_std)),
+        se_cos_std=_median_se(mean_cos_std),
+        cos_replicates_std=mean_cos_std,
+        cos_replicates_per_axis_std=cos_all_std,
+        # Sample eigenvalues: the measured structure eigenvalue, the first bulk eigenvalue,
+        # and their ratio expressed as nu_hat = lambda/lambda_bulk - 1.
+        lam_replicates=lam_replicates,
+        lam_bulk_replicates=lam_bulk_replicates,
+        nu_hat_replicates=nu_hat_replicates,
+        median_lam=float(np.median(lam_replicates)),
+        median_lam_bulk=float(np.median(lam_bulk_replicates)),
+        median_nu_hat=float(np.median(nu_hat_replicates)),
         procrustes_replicates=np.asarray(dists, dtype=float),
         cos_per_axis=np.median(cos_all, axis=0),
         se_cos_per_axis=np.array([_median_se(cos_all[:, j]) for j in range(cos_all.shape[1])]),

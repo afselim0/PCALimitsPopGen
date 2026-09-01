@@ -243,4 +243,70 @@ def peak_with_ci(fit):
                 peak_x_lo=peak_x_lo, peak_x_hi=peak_x_hi,
                 peak_y_lo=float(fit["y_lo"][j]), peak_y_hi=float(fit["y_hi"][j]))
 
+
+def pickup_with_ci(fit, frac=0.10, band_offset=0.02):
+    """
+    Where the fitted curve starts to rise -- the empirical phase transition.
+
+    Defined as the first x whose slope d(cos^2)/d(log x) reaches `frac` of the curve's
+    maximum slope over the swept range. The fit is already against log x, so the gradient
+    is taken on that native scale and the answer is invariant to the units of x.
+
+    NaN when that point is the first grid node: the curve was already rising when the
+    sweep began, so its transition lies below the swept range and cannot be located from
+    this data. That is the requested behaviour, and it is what separates a real onset from
+    a sweep that started too late -- every ss1d_vary_n and split_ss_* curve returns NaN
+    here, while every split_vary_N curve returns an interior value that decreases with N.
+
+    Why not the finite-N noise floor. The obvious definition -- where cos^2 first exceeds
+    the random-direction floor 2/(pi N) -- does not work. The measured sub-threshold cos^2
+    is flat at ~0.005 regardless of N, while 2/(pi N) falls as 1/N (off by ~8x at N=1000):
+    the sample PC below threshold is not a uniformly random direction, it retains residual
+    alignment with the structure axis. The fitted curve therefore starts above that assumed
+    floor and the crossing collapses to the left edge for nearly every curve.
+
+    A relative-slope rule needs a constant, but the answer barely depends on it: the 5%,
+    10% and 20% variants land within ~20% of each other across all four sweep groups, so
+    what is being measured is a property of the curve rather than of `frac`.
+
+    pickup_x_band is a secondary, band-aware cross-check: the first x at which the lower
+    band edge clears the curve's starting height by `band_offset`. It tracks the primary
+    closely but rests on two arbitrary choices (the offset, and y_fit[0] as a baseline --
+    which several fits clip to exactly 0), so it is recorded as a diagnostic and not
+    promoted.
+
+    Returns pickup_x, pickup_y, pickup_frac, pickup_slope_max, pickup_at_edge, pickup_x_band.
+    """
+    nan_row = dict(pickup_x=np.nan, pickup_y=np.nan, pickup_frac=frac,
+                   pickup_slope_max=np.nan, pickup_at_edge=False, pickup_x_band=np.nan)
+    if fit is None:
+        return nan_row
+
+    xg = np.asarray(fit["x_grid"], dtype=float)
+    yf = np.asarray(fit["y_fit"], dtype=float)
+    if xg.size < 3 or not np.isfinite(yf).any():
+        return nan_row
+
+    slope = np.gradient(yf, np.log(xg))
+    slope_max = float(np.nanmax(slope))
+    if not np.isfinite(slope_max) or slope_max <= 0:
+        return nan_row  # flat or falling throughout: no onset to find
+
+    idx = np.flatnonzero(slope >= frac * slope_max)
+    if idx.size == 0:
+        return nan_row
+    j = int(idx[0])
+
+    row = dict(nan_row, pickup_slope_max=slope_max)
+    if j > 0:
+        row.update(pickup_x=float(xg[j]), pickup_y=float(yf[j]),
+                   pickup_at_edge=bool(j >= len(xg) - 1))
+
+    # Diagnostic: first x whose lower band clears where the curve started.
+    y_lo = np.asarray(fit["y_lo"], dtype=float)
+    above = np.flatnonzero(y_lo >= yf[0] + band_offset)
+    if above.size and above[0] > 0:
+        row["pickup_x_band"] = float(xg[int(above[0])])
+    return row
+
 # %%

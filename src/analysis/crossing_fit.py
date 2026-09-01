@@ -55,7 +55,17 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import brentq, least_squares
 
-DEFAULT_TARGET = 0.9
+# cos^2 at which detection is declared. 0.8 rather than 0.9: the crossing is read off the
+# fitted curve as a level set, so its accuracy depends on how steeply the curve passes
+# through the target. At 0.9 the curve is already flattening, which both amplifies a small
+# vertical error into a large error in x and puts the level in the band where the arm's
+# roughness penalty biases the fit low. Measured against theory over all 51 curves of the
+# six detection sweeps, mean |bias| falls from 7.8% at 0.9 to 5.3% at 0.8 and the worst
+# case halves (0.217 -> 0.115), while three more curves gain a usable crossing -- most
+# importantly the OOA3 phi-tilde panel, which had only 4 of 10 at 0.9 because its theory
+# curve barely reaches that level. 0.7 scores marginally better still (3.5%), but 0.8 is a
+# round convention near the optimum rather than the argmin of this particular set.
+DEFAULT_TARGET = 0.8
 DEFAULT_N_BOOT = 300
 DEFAULT_SEED = 0
 _MIN_LEVELS = 4
@@ -440,7 +450,8 @@ def _safe(fn, x):
 
 # --- writing per-replicate rows ------------------------------------------
 
-def replicate_rows(base, x_value, x_name, cos_per_replicate, seed=None):
+def replicate_rows(base, x_value, x_name, cos_per_replicate, seed=None,
+                   cos_std_per_replicate=None, per_replicate_cols=None):
     """
     Expand one sweep cell into one tidy row per replicate.
 
@@ -448,22 +459,42 @@ def replicate_rows(base, x_value, x_name, cos_per_replicate, seed=None):
     N, L_eff, nu, analytical_cos, ...). Both cos and cos^2 are written: the fit works on
     cos^2, while the existing figures report |cos|.
 
+    cos_std_per_replicate is the same measurement on the standardized GRM (every locus
+    weighted equally rather than by p(1-p)), from the same subsample and against the same
+    theoretical axis, written as cos_std/cos2_std. It gets its own fit downstream, so that
+    the transition and the 0.9 crossing can be compared between the two constructions.
+
     The theoretical prediction rides along on every row. It is a property of the cell, not
     of the replicate, so it repeats identically down the block -- which is what makes the
     file self-contained: measured and predicted overlap sit side by side without a join
     back to the summary CSV. analytical_cos2 is added next to it so the comparison is on
     the same squared scale as the fit.
+
+    per_replicate_cols is the exception to that: a {name: sequence} of quantities that
+    genuinely vary between replicates of one cell rather than repeating. The random-deme
+    sweeps need it, because there each replicate draws a different deme subset and so has
+    its own nu.
     """
     rows = []
     ana = base.get("analytical_cos")
+    cos_std = (np.atleast_1d(cos_std_per_replicate)
+               if cos_std_per_replicate is not None else None)
     for rep, c in enumerate(np.atleast_1d(cos_per_replicate)):
         row = dict(base)
         row[x_name] = float(x_value)
         row["replicate"] = int(rep)
         row["cos"] = float(c)
         row["cos2"] = float(c) ** 2
+        if cos_std is not None and rep < len(cos_std):
+            row["cos_std"] = float(cos_std[rep])
+            row["cos2_std"] = float(cos_std[rep]) ** 2
         if ana is not None and np.isfinite(ana):
             row["analytical_cos2"] = float(ana) ** 2
+        if per_replicate_cols:
+            for name, values in per_replicate_cols.items():
+                values = np.atleast_1d(values)
+                if rep < len(values):
+                    row[name] = float(values[rep])
         if seed is not None:
             row["seed"] = int(seed)
         rows.append(row)

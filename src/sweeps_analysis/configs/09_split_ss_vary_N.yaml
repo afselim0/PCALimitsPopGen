@@ -36,6 +36,11 @@ cluster:
   # (subsample + GRM = 1.15G at n=60) understated the true peak by ~4x, because eigh
   # workspace, LAPACK scratch and float64 copies dominate at these N. The n=60 cell
   # alone is ~49% of the N^3 work, so the tail is where both time and memory land.
-  time: "02:00:00"   # 51 min measured, 2.4x margin for a loaded node
+  #
+  # Raised from 02:00:00 after 87 of 100 tasks hit the wall at exactly 02:00:29: the cell
+  # now does TWO eigendecompositions per replicate (the standardized GRM alongside the
+  # ordinary one) plus the eigenvalue bookkeeping, roughly doubling the 51 min baseline
+  # and leaving no margin at 2h on a loaded node.
+  time: "05:00:00"   # ~1h45 expected after the standardized GRM doubled the work
   mem: 8G            # 4.44G measured, 1.8x margin
   cpus_per_task: 1

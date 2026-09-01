@@ -6,13 +6,33 @@ The shared panel behind the overlap figures. Each curve of the sweep (a value of
 n-per-deme -- the *curve parameter*) is drawn across the *swept parameter* on the x axis
 (Fst or 1/M) as:
 
-    1. the shape-constrained scam fit through every replicate, with its 95% confidence band
-    2. a filled marker sitting on the curve where it reaches the target cos^2 (0.9) -- the
+    1. the threshold fit through every replicate (flat below the fitted transition,
+       monotone increasing above), with its 95% bootstrap band
+    2. a filled marker sitting on the curve where it reaches the target cos^2 -- the
        measured detection point, on the line rather than beside it
-    3. a dashed vertical line at the same crossing predicted by theory
+    3. a hollow marker at the measured detection threshold, taken from the SAMPLE
+       EIGENVALUES rather than from the cosine (see below)
+    4. a dash-dot vertical line at the theoretical detection threshold (nu(x) = nu_c) and a
+       dashed one at the theoretical target crossing, each with a tick per theory route
 
-The comparison between measurement and theory is the horizontal gap between the marker and
-the dashed line, which is what the detection claim actually is.
+Each measured mark pairs with the theory line beside it: the filled marker with the dashed
+0.9 line, the hollow marker with the dash-dot threshold. The horizontal gap in each pair is
+what the detection claim actually is.
+
+Why the threshold marker comes from the eigenvalues. The cosine cannot locate it at finite
+N: cos^2 leaves the 1/N random-vector noise floor far below the threshold and already reads
+0.1-0.2 when it arrives, so every rule tried for picking a transition out of that smeared
+foot was either badly biased (slope onset, 0.63x) or rested on a level with no principled
+value. The eigenvalue has a real feature there instead -- below threshold the structure
+eigenvalue is PINNED to the bulk edge, so lambda/lambda_bulk = 1 exactly -- and fitting the
+spiked-model curve to it recovers the threshold at 0.998 +/- 0.022 with no fitted constant.
+See src/analysis/eigenvalue_threshold.py. tau, the fitted transition from threshold_fit,
+is the cosine-based counterpart to it; the superseded pickup_x stays in crossings.csv as a
+diagnostic and is no longer drawn.
+
+Two theoretical quantities x three routes is six positions per curve, but they cannot be six
+styled lines: exact and approx land a fraction of a line width apart (see ROUTE_TICK_KW), so
+quantity is carried by line style and route by ticks.
 
 Curves are keyed by a discrete legend, not a continuous colourbar: the curve parameter takes
 a handful of chosen values, not a continuum, and a legend states them exactly instead of
@@ -49,7 +69,53 @@ FIT_KW = dict(linewidth=1.7, zorder=3)
 # curves converge at the right of the panel.
 CROSS_MARKER_KW = dict(marker="o", markersize=7, markeredgecolor="white",
                        markeredgewidth=1.0, zorder=6, linestyle="none")
+# Kept for callers that want to mark a transition themselves; the panels here do not draw
+# one (see the module docstring).
+# The fitted transition, drawn ON the curve, where it leaves its plateau. A square keeps it
+# distinct from the round marker at the target crossing.
+TAU_MARKER_KW = dict(marker="s", markersize=5.5, linestyle="none",
+                     markeredgecolor="white", markeredgewidth=0.8, zorder=6)
+
 THEORY_VLINE_KW = dict(linewidth=1.3, linestyle=(0, (4, 2)), zorder=4)
+# The theoretical detection threshold, at nu(x) = nu_c: where the eigenvalue separates from
+# the bulk and cos^2 leaves 0 in the N -> infinity limit. Dash-dot separates it from the
+# target crossing's dashes without reading as the fitted curve's solid line.
+THEORY_PICKUP_VLINE_KW = dict(linewidth=1.1, linestyle=(0, (3, 1.5, 1, 1.5)), zorder=4)
+
+# --- the six theoretical positions -----------------------------------------
+#
+# Two quantities (the detectability transition nu(x)=nu_c, and the target crossing) x three
+# routes (exact, approx, crude) = six x-positions per curve. They cannot all be six styled
+# lines: measured on african_split_vary_N, exact and approx sit 0.27 points apart at the 0.9
+# crossing on a 4-inch log axis, against a ~1.3 pt line width, so two of every three lines
+# would overplot into one thicker line while the legend claimed two. The crude route is the
+# one that genuinely separates (4-11 pt).
+#
+# So QUANTITY is carried by line style, drawn once at the exact route -- the reference --
+# and ROUTE by small ticks along the top spine, which mark all three positions without
+# pretending three lines are resolvable where they are not. Where the routes agree the ticks
+# coincide and say so honestly; where they disagree the spread is visible.
+ROUTES = ("exact", "approx", "crude")
+# Route is carried by its OWN SUB-ROW, not by the shape or weight of a shared mark.
+#
+# Two earlier attempts failed for the same underlying reason. Three sizes/opacities of one
+# bar encode a categorical distinction as a magnitude, and read as "the same mark, fainter".
+# Three different shapes at one height collide instead: exact and approx are typically 0.06%
+# apart, so a circle drawn for approx simply rings the exact bar, and with ten curves per
+# panel the marks smear together.
+#
+# Separating the routes vertically removes the collision by construction -- two marks can
+# now only overlap if they are the same route on two curves -- and keeps one simple shape,
+# so what varies between rows is position alone. ROUTE_ROW_DY is in cos^2 units, matching
+# the data coordinates the ticks are drawn in.
+ROUTE_TICK_KW = {
+    "exact":  dict(marker="|", markersize=3.2, markeredgewidth=1.7, linestyle="none"),
+    "approx": dict(marker="|", markersize=3.2, markeredgewidth=1.5, linestyle="none",
+                   alpha=0.85),
+    "crude":  dict(marker="|", markersize=3.2, markeredgewidth=1.5, linestyle="none",
+                   alpha=0.85),
+}
+ROUTE_ROW_DY = {"exact": 0.000, "approx": -0.030, "crude": -0.060}
 
 # Okabe-Ito, matching plotting_style's cycle: discrete curves get discrete colours.
 DISCRETE_COLORS = ["#0072B2", "#D55E00", "#009E73", "#E69F00",
@@ -175,31 +241,255 @@ def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TA
     return out
 
 
+def load_summary(summary_dir, with_theory=True):
+    """
+    (curves, crossings, points, theory) for one summary directory.
+
+    theory is None when theory.csv is absent or empty, which is the normal state for a
+    theory-free sweep (the recent-split ones) and for summaries written before stage 3
+    produced it. The random-deme sweeps write joint.csv instead, whose per-replicate theory
+    columns this reads the same way, so a caller needs no special case.
+    """
+    import pandas as pd
+
+    read = lambda name: pd.read_csv(os.path.join(summary_dir, name))
+    curves, crossings, points = read("curves.csv"), read("crossings.csv"), read("points.csv")
+
+    theory = None
+    if with_theory:
+        for name in ("theory.csv", "joint.csv"):
+            path = os.path.join(summary_dir, name)
+            if os.path.exists(path) and os.path.getsize(path) > 2:
+                try:
+                    t = pd.read_csv(path)
+                except Exception:
+                    continue
+                if len(t) and any(c.startswith(("x_c_", "x_cross_", "nu_c_"))
+                                  for c in t.columns):
+                    theory = t
+                    break
+    return curves, crossings, points, theory
+
+
+def variant_suffix(standardized):
+    """"_std" for the standardized version of a figure, "" for the plain one."""
+    return "_std" if standardized else ""
+
+
+def pdf_dir_for(figure_dir):
+    """
+    Where the PDF of a figure goes, given where its PNG goes.
+
+    The two formats are kept in sibling directories -- results/figures holds the PNGs and
+    results/pdf_figs the PDFs -- so a caller that passes results/figures gets that pairing
+    for free. Any other directory keeps both formats together, which is what the test
+    renders under misc/ want.
+    """
+    parent, name = os.path.split(os.path.normpath(figure_dir))
+    return os.path.join(parent, "pdf_figs") if name == "figures" else figure_dir
+
+
+def save_figure(fig, figure_dir, stem, standardized=False, dpi=300):
+    """
+    Write <stem><suffix>.png to figure_dir and the matching .pdf to pdf_dir_for(figure_dir).
+
+    Every sweep figure exists twice: once fitted to the overlap measured on the ordinary
+    GRM and once on the standardized one, the latter suffixed _std. Both carry the same
+    theoretical lines and ticks, so the pair is read by flipping between them.
+
+    Returns the PNG path, which is the one worth printing: it is what gets looked at.
+    """
+    name = f"{stem}{variant_suffix(standardized)}"
+    os.makedirs(figure_dir, exist_ok=True)
+    png = os.path.join(figure_dir, f"{name}.png")
+    fig.savefig(png, dpi=dpi, bbox_inches="tight")
+
+    pdf_dir = pdf_dir_for(figure_dir)
+    os.makedirs(pdf_dir, exist_ok=True)
+    fig.savefig(os.path.join(pdf_dir, f"{name}.pdf"), bbox_inches="tight")
+    return png
+
+
+def variant_note(ax, standardized, loc=None):
+    """
+    Mark a standardized panel as such, so the two versions are never confused.
+
+    Only the standardized one is annotated: the ordinary GRM is the default the rest of the
+    project assumes, and labelling both would put a redundant line on every figure.
+
+    Placed inside the axes rather than above them -- the top is already carrying the title
+    and two rows of route ticks -- in whichever bottom corner has less drawn in it. Which
+    one that is genuinely differs: the monotone sweeps rise to the right and leave the
+    bottom right clear, while the concave recent-split ones fall to the right and leave the
+    bottom left clear. Pass loc as (x, y) in axes coordinates to override.
+    """
+    if not standardized:
+        return
+    if loc is None:
+        corner = _emptiest_corner(ax, candidates=("lower right", "lower left"))
+        loc = (0.985, 0.02) if corner == "lower right" else (0.015, 0.02)
+    ha = "right" if loc[0] > 0.5 else "left"
+    # A background box, because the theory rules run the full height of the panel and would
+    # otherwise strike through the text wherever a crossing lands near this corner.
+    ax.text(loc[0], loc[1], "standardized GRM", transform=ax.transAxes,
+            ha=ha, va="bottom", fontsize=8, style="italic", color="0.35", zorder=8,
+            bbox=dict(facecolor="white", edgecolor="none", alpha=0.8, pad=1.5))
+
+
+def _col(frame, name, standardized):
+    """
+    `name` or its _std twin, whichever this frame actually has.
+
+    Falling back rather than raising is deliberate: a summary written before the
+    standardized measurement existed has only the plain columns, and a standardized panel
+    over such a summary should degrade to the unstandardized curve rather than fail. The
+    theory columns have no _std twin by design -- the theory is a property of the
+    demography, not of how the GRM was built -- so they always resolve to the plain name.
+    """
+    std = f"{name}_std"
+    return std if standardized and std in frame.columns else name
+
+
+def _val(row, name):
+    """The scalar in `name` for a one-row frame, or NaN when absent."""
+    if row is None or not len(row) or name not in row:
+        return np.nan
+    try:
+        return float(row[name].iloc[0])
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def _theory_positions(row, kind, theory=None, level=None):
+    """
+    The three routes' x-positions for one quantity of one curve, as {route: x}.
+
+    kind is "pickup" (the detectability transition, nu(x) = nu_c) or "cross" (the 0.9
+    crossing). Reads crossings.csv's row first; falls back to theory.csv, which is where
+    they live once stage 3 writes it, and which is also the frame the random-deme sweeps
+    supply per replicate.
+    """
+    template = {"pickup": "x_c_{}", "cross": "x_cross_{}"}[kind]
+    out = {}
+    for route in ROUTES:
+        v = np.nan
+        name = template.format(route)
+        if row is not None and len(row) and name in row:
+            v = float(row[name].iloc[0])
+        if not np.isfinite(v) and theory is not None and name in theory.columns:
+            t = theory[theory["level"] == level] if level is not None else theory
+            vals = t[name].to_numpy(dtype=float) if len(t) else np.array([])
+            vals = vals[np.isfinite(vals)]
+            if vals.size:
+                # Constant down a curve by construction, except on the per-replicate
+                # sweeps, where the median over replicates is the summary that matches
+                # how nu itself was defined there. Filtered first: an all-NaN route is a
+                # legitimate state (no h, so no exact), not something to warn about.
+                v = float(np.median(vals))
+        out[route] = v
+    return out
+
+
+def _label_tick_rows(ax, tick_ys=(1.290, 1.110), fontsize=5.5):
+    """
+    Name the six tick sub-rows down the left margin.
+
+    Six rows of bars are not self-describing: without labels the reader can see that the
+    routes differ but not which row is which. The labels sit just outside the left spine in
+    axes coordinates, so they do not move with the data.
+    """
+    for tick_y, group in zip(tick_ys, ("threshold", r"$\langle\hat u,u\rangle^2$")):
+        for route in ROUTES:
+            y = tick_y + ROUTE_ROW_DY[route]
+            ax.text(-0.012, y, route, transform=ax.get_yaxis_transform(),
+                    ha="right", va="center", fontsize=fontsize, color="0.45",
+                    clip_on=False)
+        ax.text(-0.075, tick_y + ROUTE_ROW_DY["approx"], group,
+                transform=ax.get_yaxis_transform(), ha="right", va="center",
+                fontsize=fontsize + 1.0, color="0.3", clip_on=False)
+
+
+def _draw_theory_marks(ax, positions, color, vline_kw, draw_line=True, tick_y=1.0):
+    """
+    One quantity's three routes: a styled vertical line at the exact route, plus a tick per
+    route just above the top spine.
+
+    The line carries which quantity this is; the ticks resolve the individual routes. Where
+    a route is unavailable -- no per-locus weights, so no exact -- its tick is simply absent
+    rather than substituted.
+
+    A shaded span across the three routes was tried and dropped: on the transition group the
+    crude route sits a factor of two away, so the spans covered most of the panel and, across
+    nine curves, stacked into blocks that hid the data they were annotating. The ticks carry
+    the same information without painting over the curves.
+    """
+    vals = [positions.get(r, np.nan) for r in ROUTES]
+    finite = [v for v in vals if np.isfinite(v)]
+    if not finite:
+        return
+
+    ref = positions.get("exact", np.nan)
+    if not np.isfinite(ref):
+        ref = finite[0]      # exact unavailable: fall back so the quantity is still shown
+    if draw_line:
+        ax.axvline(ref, color=color, **vline_kw)
+    for route in ROUTES:
+        v = positions.get(route, np.nan)
+        if np.isfinite(v):
+            # Data coordinates, not axes fraction: the panel reserves headroom above
+            # cos^2 = 1 for these rows, so they must sit at a fixed cos^2 value rather
+            # than at a fraction of an axis whose top has moved.
+            ax.plot([v], [tick_y + ROUTE_ROW_DY[route]], color=color, clip_on=False,
+                    zorder=7, **ROUTE_TICK_KW[route])
+
+
 def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                                 cmap=None, cbar_label="", target=DEFAULT_TARGET,
                                 levels=None, show_points=True, show_theory_curve=False,
-                                show_theory_crossing=True,
+                                show_theory_crossing=True, theory_table=None,
+                                standardized=False, show_eig_threshold=True,
                                 legend_title=None, legend_loc=None,
                                 legend_ncol=1, show_legend=True, **_ignored):
     """
     Draw one panel from the pre-fitted summary files. Fits nothing.
 
-    Stage 3 already did the scam fit, its confidence band and the theory inversion, so this
-    only renders columns. Each curve gets a discrete colour and a legend entry; the measured
-    crossing is a filled marker sitting on the curve at the target level, and the theoretical
-    crossing a dashed vertical line in the same colour.
+    Stage 3 already did the fit, its confidence band and the theory inversion, so this
+    only renders columns. Each curve gets a discrete colour and a legend entry, and carries
+    three marks, with a tick per route (exact/approx/crude) above each theory line along the
+    top spine:
+
+        filled marker   the measured target crossing, on the curve at the target
+        dash-dot line   the theoretical detection threshold (nu(x) = nu_c), at the exact route
+        dashed line     the theoretical target crossing, at the exact route
+
+    The detection threshold gets no empirical marker -- see the module docstring for why.
+    See the note at ROUTE_TICK_KW for why the routes are ticks and not six separate lines.
 
     Args:
         curves: rows of curves.csv (x, y_fit, y_lo, y_hi, y_theory).
-        crossings: rows of crossings.csv (crossing, crossing_y, theory_crossing_pred).
+        crossings: rows of crossings.csv (crossing, pickup_x, theory_crossing_pred, and the
+            x_c_*/x_cross_* columns when present).
         points: rows of points.csv for the scatter, or None to omit it.
-        sweep: filter all three frames to this sweep name first.
+        theory_table: rows of theory.csv, used for the per-route positions when crossings
+            does not carry them, and for the random-deme sweeps, where the routes are
+            summarised as the median over replicates. None for a theory-free sweep.
+        show_eig_threshold: accepted and ignored; the eigenvalue-threshold marker is no
+            longer drawn, the panel marks the fitted transition instead.
+            Turn it off for the models where the single-spike fit behind it does not apply
+            (the stepping-stones, where K ~ N leaves many axes detached at once).
+        standardized: draw the curve, band, scatter and measured marks from the
+            standardized-GRM columns (cos2_std, y_fit_std, crossing_std, pickup_x_std).
+            The THEORY marks are unaffected and stay exactly as in the unstandardized
+            panel: nu, nu_c and the crossings are properties of the demography and the
+            locus weights, not of how the sample GRM was built, so the two versions of a
+            figure carry identical lines and ticks and differ only in the measurement.
+        sweep: filter all frames to this sweep name first.
         cbar_label: used as the legend title (kept under its old name so the figure scripts
             need no edit).
         show_theory_curve: also draw the continuous theoretical curve, not just its crossing.
-        show_theory_crossing: draw the dashed vertical line at the theoretical crossing.
-            Off for the panels where the theory is not the point being made; the number is
-            still returned and printed in the crossings table either way.
+        show_theory_crossing: draw the theoretical lines and route ticks at all. Off for the
+            panels where the theory is not the point being made, and for the theory-free
+            recent-split sweeps; the numbers are still returned either way.
 
     Returns the per-curve crossing rows as a list of dicts.
     """
@@ -208,6 +498,8 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
         crossings = crossings[crossings["sweep"] == sweep]
         if points is not None:
             points = points[points["sweep"] == sweep]
+        if theory_table is not None and "sweep" in theory_table.columns:
+            theory_table = theory_table[theory_table["sweep"] == sweep]
 
     if levels is None:
         levels = np.sort(curves["level"].unique())
@@ -221,17 +513,49 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 
         if show_points and points is not None:
             pt = points[points["level"] == level]
-            ax.scatter(pt["x"], pt["cos2"], color=color, **POINT_KW)
+            pcol = "cos2_std" if standardized and "cos2_std" in pt.columns else "cos2"
+            ax.scatter(pt["x"], pt[pcol], color=color, **POINT_KW)
 
-        ax.fill_between(c["x"], c["y_lo"], c["y_hi"], color=color, **BAND_KW)
-        ax.plot(c["x"], c["y_fit"], "-", color=color, label=format_level(level), **FIT_KW)
+        ax.fill_between(c["x"], c[_col(c, "y_lo", standardized)],
+                        c[_col(c, "y_hi", standardized)], color=color, **BAND_KW)
+        ax.plot(c["x"], c[_col(c, "y_fit", standardized)], "-", color=color,
+                label=format_level(level), **FIT_KW)
         if show_theory_curve and c["y_theory"].notna().any():
             ax.plot(c["x"], c["y_theory"], ":", color=color, linewidth=1.0, zorder=3)
 
         row = crossings[crossings["level"] == level]
-        crossing = float(row["crossing"].iloc[0]) if len(row) else np.nan
-        theory = float(row["theory_crossing_pred"].iloc[0]) if len(row) else np.nan
-        at_edge = bool(row["crossing_at_edge"].iloc[0]) if len(row) and             "crossing_at_edge" in row else False
+        crossing = _val(row, _col(row, "crossing", standardized))
+        theory = _val(row, "theory_crossing_pred")
+        at_edge = bool(row[_col(row, "crossing_at_edge", standardized)].iloc[0]) \
+            if len(row) and _col(row, "crossing_at_edge", standardized) in row else False
+
+        # The measured detection threshold, from the SAMPLE EIGENVALUES rather than the
+        # cosine: below threshold the structure eigenvalue is pinned to the bulk edge, so
+        # lambda/lambda_bulk = 1 is a real feature of the spectrum, which the cosine has no
+        # equivalent of at finite N (see src/analysis/eigenvalue_threshold.py). Kept as a
+        # returned diagnostic but no longer drawn: the transition on the panel is now the
+        # fitted break below, which is measured from the cosine data itself and sits
+        # exactly where the drawn curve leaves its plateau. Two markers for one quantity
+        # invited the reading that the curve was picking up away from its own transition.
+        x_c_emp = _val(row, "x_c_emp")
+
+        # The fitted transition -- where the drawn curve leaves its plateau. Marked on the
+        # curve so it sits exactly where the line lifts off, which is the whole point of
+        # the threshold fit; the hollow marker above is the independent eigenvalue estimate
+        # of the same quantity, and the two being close is the result worth seeing.
+        # Suppressed when the curve was already rising at the smallest swept x: tau is then
+        # the left edge, a bound rather than a measurement, and a marker there would read
+        # as a detected transition. Older summaries carry the superseded slope-based
+        # pickup_x instead; _val gives NaN for whichever is absent.
+        tau = _val(row, _col(row, "tau", standardized))
+        below_range = bool(_val(row, _col(row, "tau_below_range", standardized)) == 1)
+        if np.isfinite(tau) and not below_range and len(c):
+            y_tau = float(np.interp(np.log(tau), np.log(c["x"].to_numpy(float)),
+                                    c[_col(c, "y_fit", standardized)].to_numpy(float)))
+            ax.plot([tau], [y_tau], color=color, **TAU_MARKER_KW)
+        pickup_x = tau if np.isfinite(tau) else _val(
+            row, _col(row, "pickup_x", standardized))
+
         if np.isfinite(crossing):
             # On the curve, at the target: the marker is the crossing, so it cannot drift
             # away from the line the way a separate vertical rule could. A curve that only
@@ -244,20 +568,44 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                            "markeredgecolor": color, "markeredgewidth": 1.4})
             else:
                 ax.plot([crossing], [target], color=color, **CROSS_MARKER_KW)
-            # Theory drawn only where the fit also reaches the target: a lone dashed line
-            # reads as a detection point the data never supports. The number is in the
-            # table either way.
-            if show_theory_crossing and np.isfinite(theory):
+
+        # The two theoretical quantities, each as a styled line at the exact route plus a
+        # tick per route. The target crossing is drawn only where the fit also reaches the
+        # target: a lone line there reads as a detection point the data never supports. The
+        # transition has no such condition -- it is where the eigenvalue separates, which is
+        # meaningful whether or not the curve later reaches the target.
+        if show_theory_crossing:
+            # Two tick rows at different heights, so each row reads with its own line group
+            # rather than the two interleaving into one ambiguous comb.
+            xc = _theory_positions(row, "pickup", theory_table, level)
+            _draw_theory_marks(ax, xc, color, THEORY_PICKUP_VLINE_KW, tick_y=1.290)
+            xx = _theory_positions(row, "cross", theory_table, level)
+            if not np.isfinite(crossing):
+                xx = {r: np.nan for r in ROUTES}
+            _draw_theory_marks(ax, xx, color, THEORY_VLINE_KW, tick_y=1.110)
+            if np.isfinite(crossing) and np.isfinite(theory) and \
+                    not np.isfinite(xx.get("exact", np.nan)):
+                # Older summaries carry only theory_crossing_pred; keep drawing it.
                 ax.axvline(theory, color=color, **THEORY_VLINE_KW)
 
         out.append(dict(level=level, crossing=crossing,
-                        crossing_lo=float(row["crossing_lo"].iloc[0]) if len(row) else np.nan,
-                        crossing_hi=float(row["crossing_hi"].iloc[0]) if len(row) else np.nan,
-                        theory=theory, at_edge=at_edge))
+                        crossing_lo=_val(row, _col(row, "crossing_lo", standardized)),
+                        crossing_hi=_val(row, _col(row, "crossing_hi", standardized)),
+                        theory=theory, at_edge=at_edge,
+                        pickup=pickup_x, tau=tau,
+                        tau_lo=_val(row, _col(row, "tau_lo", standardized)),
+                        tau_hi=_val(row, _col(row, "tau_hi", standardized)),
+                        x_c_emp=x_c_emp))
 
     ax.axhline(target, color="0.6", linewidth=0.8, linestyle=":", zorder=0)
     ax.set_xscale("log")
-    ax.set_ylim(-0.04, 1.04)
+    # Headroom for the two route-tick rows, which are drawn just above cos^2 = 1 in axes
+    # coordinates. Reserving it in the limits (rather than padding the title) keeps the
+    # ticks inside the axes, so a title set later by the figure script cannot collide with
+    # them and tight_layout does not crop them.
+    ax.set_ylim(-0.04, 1.32 if show_theory_crossing else 1.04)
+    if show_theory_crossing:
+        _label_tick_rows(ax)
     ax.set_ylabel(r"squared overlap  $\langle \hat u, u\rangle^2$")
     if show_legend:
         _curve_legend(ax, legend_title if legend_title is not None else cbar_label,
@@ -268,6 +616,7 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
                             cmap=None, cbar_label="", target=DEFAULT_TARGET,
                             levels=None, show_points=True, mark_peak=True,
+                            standardized=False,
                             legend_title=None, legend_loc=None,
                             show_legend=True, **_ignored):
     """
@@ -297,22 +646,29 @@ def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 
         if show_points and points is not None:
             pt = points[points["level"] == level]
-            ax.scatter(pt["x"], pt["cos2"], color=color, **POINT_KW)
+            pcol = "cos2_std" if standardized and "cos2_std" in pt.columns else "cos2"
+            ax.scatter(pt["x"], pt[pcol], color=color, **POINT_KW)
 
-        ax.fill_between(c["x"], c["y_lo"], c["y_hi"], color=color, **BAND_KW)
-        ax.plot(c["x"], c["y_fit"], "-", color=color, label=format_level(level), **FIT_KW)
+        ax.fill_between(c["x"], c[_col(c, "y_lo", standardized)],
+                        c[_col(c, "y_hi", standardized)], color=color, **BAND_KW)
+        ax.plot(c["x"], c[_col(c, "y_fit", standardized)], "-", color=color,
+                label=format_level(level), **FIT_KW)
 
         row = crossings[crossings["level"] == level]
-        px = float(row["peak_x"].iloc[0]) if len(row) and "peak_x" in row else np.nan
-        py = float(row["peak_y"].iloc[0]) if len(row) and "peak_y" in row else np.nan
+        px = _val(row, _col(row, "peak_x", standardized))
+        py = _val(row, _col(row, "peak_y", standardized))
         if mark_peak and np.isfinite(px) and np.isfinite(py):
             ax.plot([px], [py], color=color, **CROSS_MARKER_KW)
 
+        # No empirical transition marker here either, for the same reason as the crossing
+        # panel; this demography also publishes no theory at all (see
+        # models/split_stepping_stone.py).
+
         out.append(dict(level=level, peak_x=px, peak_y=py,
-                        peak_x_lo=float(row["peak_x_lo"].iloc[0]) if len(row) else np.nan,
-                        peak_x_hi=float(row["peak_x_hi"].iloc[0]) if len(row) else np.nan,
-                        peak_y_lo=float(row["peak_y_lo"].iloc[0]) if len(row) else np.nan,
-                        peak_y_hi=float(row["peak_y_hi"].iloc[0]) if len(row) else np.nan))
+                        peak_x_lo=_val(row, _col(row, "peak_x_lo", standardized)),
+                        peak_x_hi=_val(row, _col(row, "peak_x_hi", standardized)),
+                        peak_y_lo=_val(row, _col(row, "peak_y_lo", standardized)),
+                        peak_y_hi=_val(row, _col(row, "peak_y_hi", standardized))))
 
     ax.axhline(target, color="0.6", linewidth=0.8, linestyle=":", zorder=0)
     ax.set_xscale("log")
@@ -443,7 +799,8 @@ def peak_table(results, level_name, x_name):
 
 
 def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False,
-                    show_theory_crossing=True, show_band=True):
+                    show_theory_crossing=True, show_band=True,
+                    show_eig_threshold=True):
     """
     Key for what the marks mean on a crossing panel, beside the per-curve legend.
 
@@ -451,25 +808,33 @@ def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False
     legend -- needed where the auto choice would land the key on the curves themselves.
     show_theory_crossing must match what the panel drew, or the key describes a line that
     is not on it. show_band drops the band swatch where the band is too narrow on the page
-    to be worth a key entry.
+    to be worth a key entry. show_eig_threshold is accepted and ignored: the hollow
+    eigenvalue-threshold marker it used to key is no longer drawn.
     """
     handles = [
-        Line2D([], [], color="0.35", linewidth=1.7, label="monotonic spline fit"),
+        Line2D([], [], color="0.35", linewidth=1.7, label="threshold fit"),
+        Line2D([], [], color="0.35", label="measured transition (fit)", **TAU_MARKER_KW),
     ]
     if show_band:
         handles.append(
             Patch(facecolor="0.35", alpha=0.25, edgecolor="none",
-                  label="99% confidence band"))
-    handles += [
+                  label="95% bootstrap band"))
+    handles.append(
         Line2D([], [], color="0.35",
                label=rf"measured $\langle\hat u,u\rangle^2={target:g}$",
-               **CROSS_MARKER_KW),
-    ]
+               **CROSS_MARKER_KW))
     if show_theory_crossing:
-        handles.append(
+        handles += [
+            Line2D([], [], color="0.35", label="theory: detection threshold",
+                   **THEORY_PICKUP_VLINE_KW),
             Line2D([], [], color="0.35",
-                   label=rf"theoretical $\langle\hat u,u\rangle^2={target:g}$",
-                   **THEORY_VLINE_KW))
+                   label=rf"theory: $\langle\hat u,u\rangle^2={target:g}$",
+                   **THEORY_VLINE_KW),
+            # The rows are labelled on the axis itself (_label_tick_rows), so the key only
+            # has to say what the marks are.
+            Line2D([], [], color="0.35", label="theory route, one tick row each",
+                   marker="|", markersize=8, markeredgewidth=1.4, linestyle="none"),
+        ]
     _add_second_legend(ax, handles, loc, force_loc=force_loc)
 
 

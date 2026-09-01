@@ -7,3 +7,6 @@ fixed:
   L: 1000000
   Ne: 10000
   counts: true
+cluster:
+  job_name: panmictic
+  cpus_per_task: 48       # single row (L=1e6); parallelism must come from workers, not the array

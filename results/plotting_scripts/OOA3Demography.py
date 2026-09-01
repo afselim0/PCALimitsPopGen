@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import stdpopsim
 
+from crossing_panel import save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -175,10 +176,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
                 fontsize=13, fontweight='bold', va='bottom', ha='right')
 
     fig.tight_layout()
-    os.makedirs(figure_dir, exist_ok=True)
-    out = os.path.join(figure_dir, "OOA3Demography.pdf")
-    fig.savefig(out, bbox_inches='tight')
-    fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches='tight')
+    out = save_figure(fig, figure_dir, "OOA3Demography")
     print(f"wrote {out}")
     return fig
 

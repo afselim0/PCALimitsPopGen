@@ -31,7 +31,7 @@ from split_stepping_stone_theory import equilibrium_B_axes, within_B_F_hat
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
-from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
+# No threshold_and_overlap import: this model publishes no theory (see the note below axes).
 
 SIM_PARAM = "invM"
 X_KEY = "inv_M"
@@ -134,51 +134,16 @@ def axes(ctx, design, sim_row, cfg):
                            N=int(n_A + N_B_total), nu_1=float(nu[0])))
 
 
-def theory_overlap(ctx, design, sim_row, cfg, measured):
-    """
-    1/M -> predicted cos^2, re-solving the spatial eigenvalue at each M.
-
-    nu comes from within_B_F_hat's sparse phase-type solve, which is what this demography
-    needs -- the equilibrium stepping-stone closed form does not apply to a recent split.
-    It is genuinely nonlinear in 1/M (the split time sets a ceiling on how much spatial
-    structure can accumulate), so the earlier proportional rescaling of a single anchor
-    was not just imprecise but the wrong shape. m is recovered from the swept M at fixed
-    K and Ne_ancestral, and the solve repeated per point.
-
-    The overlap uses the exact route on the per-locus weights h when available. phi covers
-    the panmictic block A plus B's K^2 demes; eps is left at zero, as the flat route
-    assumed.
-    """
-    K = int(ctx["K"])
-    K_demes = K * K
-    Ne_anc, t_split = float(ctx["Ne_ancestral"]), float(ctx["t_split"])
-    n_per_deme_B = int(measured.get("n_per_deme_B", 0))
-    n_A = int(measured.get("n_A", 0))
-    gamma_raw = float(measured["gamma_raw"])
-    if not n_per_deme_B or not n_A or not np.isfinite(Ne_anc) or not np.isfinite(t_split):
-        return None
-
-    n = np.concatenate([[n_A], np.full(K_demes, n_per_deme_B)])
-    phi = n / n.sum()
-    eps = np.zeros(len(n))
-
-    h = measured.get("h")
-    use_exact = h is not None and len(np.asarray(h))
-    if use_exact:
-        h = np.asarray(h, dtype=float)
-        nu_c = exact_nu_c(phi, eps, h, gamma_raw)
-    else:
-        mu2, delta = float(measured["mu2"]), float(measured["delta"])
-        if not np.isfinite(mu2) or not np.isfinite(delta):
-            return None
-        nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
-
-    def overlap(inv_M):
-        # M = 4 * Ne_ancestral / K^2 * m, inverted for m at this point of the sweep.
-        m = (1.0 / float(inv_M)) * (K * K) / (4.0 * Ne_anc)
-        nu_vals, _ = within_B_F_hat(K, m, t_split, Ne_anc, n_per_deme_B)
-        nu = float(np.mean(nu_vals[:2]))       # the degenerate spatial pair
-        if use_exact:
-            return exact_overlap(nu, phi, eps, h, gamma_raw, nu_c=nu_c)
-        return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
-    return overlap
+# --- no theory for this model ---------------------------------------------
+#
+# theory_overlap, nu_of_x and theory_context are deliberately NOT defined here, which is
+# what marks this model theory-free (see models/__init__.py). The summariser tests for the
+# attribute and falls back to NaN y_theory / theory_crossing_pred, and writes no theory.csv
+# rows for these sweeps.
+#
+# The reason is the demography, not the machinery: this is a recent split, so the
+# equilibrium stepping-stone closed form does not apply, and the sparse phase-type solve
+# that would replace it (split_stepping_stone_theory.within_B_F_hat) is not currently
+# trusted enough to publish as a prediction. axes() below still uses within_B_F_hat to
+# build V_theory -- that is the MEASUREMENT axis the empirical cosine is taken against,
+# which is a different thing from predicting what that cosine will be.

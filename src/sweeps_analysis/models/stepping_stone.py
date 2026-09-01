@@ -52,6 +52,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "simulations"))  # src/simulations/
 from stepping_stone_grid import (closed_form_eigenvector_1d, closed_form_eigenvector_2d,
                                  closed_form_spectrum, num_demes,
+                                 replicate_structure_eigenvalues,
                                  strided_demes, strided_structure_eigenvalues,
                                  subsampled_structure_eigenvalues)
 
@@ -257,6 +258,7 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
     phi = design["deme_fraction"]
     k = k_lead(cfg)
     L = cfg["fixed"].get("L")
+    Ne = float(sim_row["Ne"])
 
     # The closed form presumes every deme is sampled; at phi < 1 nu is the median over
     # random deme subsets instead (see subsampled_structure_eigenvalues).
@@ -266,8 +268,9 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
     else:
         nu = subsampled_structure_eigenvalues(K, M, n_per, phi, dimension)
 
-    cos_all, dists, L_effs, L_raws = [], [], [], []
-    mu2s, deltas = [], []
+    cos_all, cos_all_std, dists, L_effs, L_raws = [], [], [], [], []
+    mu2s, deltas, nu_reps = [], [], []
+    lam_all, lam_bulk_all = [], []
     h_rep0 = None
     for rep in range(n_replicates):
         rng = np.random.default_rng([seed, rep])
@@ -275,13 +278,35 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
         n = np.zeros(K_demes, dtype=int)
         n[demes] = n_per
 
+        # This replicate's OWN structure eigenvalue, for the deme set it actually drew.
+        # nu above is the median over 16 unrelated subsets, which describes the sampling
+        # scheme rather than this draw; at phi < 1 different subsets of the same size give
+        # genuinely different nu, so the per-replicate value is what pairs with the
+        # per-replicate measurement. The generic F_hat route is used rather than the
+        # even-sampling closed form, which does not apply once demes are missing.
+        nu_reps.append(replicate_structure_eigenvalues(K, M, n_per, demes, dimension,
+                                                       k, Ne=Ne))
+
         sub = subsample(Z, n, L, rng)
         V_theory = true_axis_restricted(K, dimension, n_per, demes, K_demes)
         by_magnitude = np.any(nu < 0)
-        V_s = sample_eigenvectors(sub, list(range(k)), by_magnitude=by_magnitude)
+        # Only the sampled demes carry samples, so the number of subpopulations here is
+        # len(demes): its K-1 structure eigenvalues sit at ranks 0..K-2 and rank K-1 is the
+        # first bulk level.
+        V_s, lam, lam_bulk = sample_eigenvectors(
+            sub, list(range(k)), by_magnitude=by_magnitude,
+            return_eigenvalues=True, bulk_index=max(len(demes) - 1, 1))
 
         cos_all.append(principal_cosines(V_theory, V_s))
         dists.append(procrustes_distance(V_theory, V_s))
+        lam_all.append(float(np.mean(lam)))
+        lam_bulk_all.append(lam_bulk)
+
+        # Same subsample, same axis, every locus weighted equally (see pc_recovery).
+        V_s_std = sample_eigenvectors(sub, list(range(k)), by_magnitude=by_magnitude,
+                                      standardize=True)
+        cos_all_std.append(principal_cosines(V_theory, V_s_std))
+
         L_effs.append(effective_L(sub))
         L_raws.append(sub.shape[1])
         # The locus heteroskedasticity the exact threshold/overlap route needs. Recorded
@@ -295,6 +320,15 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
 
     cos_all = np.array(cos_all)
     mean_cos = cos_all.mean(axis=1)
+    cos_all_std = np.array(cos_all_std)
+    mean_cos_std = cos_all_std.mean(axis=1)
+    # One nu per replicate: the degenerate pair is averaged the way the measurement
+    # averages its two axes, so nu and cos describe the same subspace.
+    nu_per_replicate = np.array([float(np.mean(v)) for v in nu_reps])
+    lam_replicates = np.array(lam_all, dtype=float)
+    lam_bulk_replicates = np.array(lam_bulk_all, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nu_hat_replicates = lam_replicates / lam_bulk_replicates - 1.0
     L_eff_med = float(np.median(L_effs))
     L_raw_med = float(np.median(L_raws))
     N_eff = int(n.sum())            # every replicate samples the same total N
@@ -323,7 +357,90 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
                 N=N_eff, K=K_demes, k=k,
                 n_demes_sampled=int(len(demes)),
                 num_replicates=n_replicates, seed=seed,
-                cos_replicates=mean_cos)
+                cos_replicates=mean_cos,
+                median_cos_std=float(np.median(mean_cos_std)),
+                se_cos_std=float(np.std(mean_cos_std, ddof=1) / np.sqrt(len(mean_cos_std)))
+                if len(mean_cos_std) > 1 else np.nan,
+                cos_replicates_std=mean_cos_std,
+                # Per-replicate theory: each replicate drew its own deme subset, so nu is
+                # a property of the replicate here, not of the cell.
+                nu_replicates=nu_per_replicate,
+                lam_replicates=lam_replicates,
+                lam_bulk_replicates=lam_bulk_replicates,
+                nu_hat_replicates=nu_hat_replicates,
+                median_lam=float(np.median(lam_replicates)),
+                median_lam_bulk=float(np.median(lam_bulk_replicates)),
+                median_nu_hat=float(np.median(nu_hat_replicates)))
+
+
+NU_FORM = "closed_form_or_numeric"
+
+
+def theory_context(ctx, design, sim_row, cfg, measured):
+    """
+    The RMT inputs for this cell, with no nu in them.
+
+    Only the sampled demes carry samples, and each carries the same number, so phi is flat
+    over however many demes the design actually covers. eps is zero throughout: homogeneous
+    migration and equal deme sizes make every within-deme coalescent time equal (see
+    stepping_stone_grid.full_spectrum).
+    """
+    n_demes = int(measured.get("n_demes_sampled", ctx["K_demes"]))
+    try:
+        gamma_raw = float(measured["gamma_raw"])
+        if not np.isfinite(gamma_raw) or gamma_raw <= 0:
+            return None
+        return dict(phi=np.full(n_demes, 1.0 / n_demes), eps=np.zeros(n_demes),
+                    h=measured.get("h"), gamma_raw=gamma_raw,
+                    mu2=float(measured.get("mu2", np.nan)),
+                    delta=float(measured.get("delta", np.nan)),
+                    N=int(measured["N"]), L_eff=float(measured["L_eff"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def nu_of_x(ctx, design, sim_row, cfg, measured):
+    """
+    1/M -> the structure eigenvalue, by whichever of the three routes the design calls for.
+
+    Under EVEN sampling nu_k = N / (M * K_demes * mu_k) with the exact
+    mu_k = 4 sin^2(pi k / 2K) (1D) or mu_k + mu_l (2D), recomputed at every 1/M by
+    closed_form_spectrum rather than rescaling a single recorded anchor. The two agree
+    here -- nu really is proportional to 1/M with no pedestal -- but recomputing keeps the
+    exact mu_k in the loop instead of inheriting whatever the anchor cell held.
+
+    Under uniform dilution nu comes from strided_structure_eigenvalues, the exact numeric
+    value for the deme set that stride names -- no median, because the set is not random.
+
+    That closed form presumes every deme is sampled and is WRONG at deme_fraction < 1,
+    where it overstates nu badly (1D, K=25, phi=0.2: 101 against an actual ~18). A fraction
+    does not name a scheme, so nu is taken from subsampled_structure_eigenvalues, which
+    defines it as the median over 16 random deme subsets.
+    """
+    K, dimension = ctx["K"], ctx["dimension"]
+    n_per = int(measured.get("n_per_deme", design["n_per_deme"]
+                             if isinstance(design, dict) else 0))
+    if not n_per:
+        return None
+    k = k_lead(cfg)
+    n_demes = int(measured.get("n_demes_sampled", ctx["K_demes"]))
+    frac = float(measured.get("deme_fraction", n_demes / ctx["K_demes"]))
+    # A stride names an exact deme set, so nu is the numeric value for that set rather
+    # than the median over random subsets of the same size.
+    stride = measured.get("deme_stride")
+    stride = int(stride) if stride is not None and np.isfinite(stride) else None
+    Ne = float(measured.get("Ne", 100.0))
+
+    def nu_at(inv_M):
+        M = 1.0 / float(inv_M)
+        if stride is not None:
+            nu_full = strided_structure_eigenvalues(K, M, n_per, stride, dimension, Ne=Ne)
+        elif frac >= 1.0:
+            _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
+        else:
+            nu_full = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)
+        return float(np.mean(nu_full[:k]))   # the degenerate pair shares one value in 2D
+    return nu_at
 
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):
@@ -355,51 +472,27 @@ def theory_overlap(ctx, design, sim_row, cfg, measured):
     threshold_and_overlap). This uses the exact route as asked; the criterion question is
     separate.
     """
-    K, dimension = ctx["K"], ctx["dimension"]
-    K_demes = ctx["K_demes"]
-    n_per = int(measured.get("n_per_deme", design["n_per_deme"]
-                             if isinstance(design, dict) else 0))
-    k = k_lead(cfg)
-    N = int(measured["N"])
-    gamma_raw = float(measured["gamma_raw"])
-    if not n_per or not np.isfinite(gamma_raw) or gamma_raw <= 0:
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    nu_fn = nu_of_x(ctx, design, sim_row, cfg, measured)
+    if tc is None or nu_fn is None:
         return None
+    phi, eps, gamma_raw = tc["phi"], tc["eps"], tc["gamma_raw"]
 
-    # Only the sampled demes carry samples, and each carries the same number, so phi is
-    # flat over however many demes the design actually covers.
-    n_demes = int(measured.get("n_demes_sampled", K_demes))
-    phi = np.full(n_demes, 1.0 / n_demes)
-    eps = np.zeros(n_demes)
-
-    h = measured.get("h")
+    h = tc.get("h")
     use_exact = h is not None and len(np.asarray(h))
     if use_exact:
         h = np.asarray(h, dtype=float)
         nu_c = exact_nu_c(phi, eps, h, gamma_raw)
     else:
-        mu2, delta = float(measured["mu2"]), float(measured["delta"])
+        mu2, delta = tc["mu2"], tc["delta"]
         if not np.isfinite(mu2) or not np.isfinite(delta):
             # The random-sampling path records mu2/delta as NaN, so without h there is
             # nothing to build an exact prediction from.
             return None
         nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
 
-    frac = float(measured.get("deme_fraction", n_demes / K_demes))
-    # A stride names an exact deme set, so nu is the numeric value for that set rather
-    # than the median over random subsets of the same size.
-    stride = measured.get("deme_stride")
-    stride = int(stride) if stride is not None and np.isfinite(stride) else None
-    Ne = float(measured.get("Ne", 100.0))
-
     def overlap(inv_M):
-        M = 1.0 / float(inv_M)
-        if stride is not None:
-            nu_full = strided_structure_eigenvalues(K, M, n_per, stride, dimension, Ne=Ne)
-        elif frac >= 1.0:
-            _, nu_full, _ = closed_form_spectrum(K, M, n_per, dimension)
-        else:
-            nu_full = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)
-        nu = float(np.mean(nu_full[:k]))       # the degenerate pair shares one value in 2D
+        nu = nu_fn(inv_M)
         if use_exact:
             return exact_overlap(nu, phi, eps, h, gamma_raw, nu_c=nu_c)
         return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)

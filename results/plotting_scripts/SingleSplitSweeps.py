@@ -5,7 +5,7 @@ PC1 recovery across the two-population split sweep, as a detection threshold in 
 A  PC1 squared overlap vs Fst at ten sample sizes N (phi = 0.5).
 B  PC1 squared overlap vs Fst at ten sampling fractions phi (N = 200).
 
-Each level is a monotone shape-constrained (scam) fit through every replicate, with its
+Each level is a flat-then-increasing threshold fit through every replicate, with its
 95% confidence band. The comparison against theory is made at a single point rather than
 along the whole curve: a filled marker sits on the curve where it reaches squared overlap
 0.9, and a dashed vertical line marks the Fst where the theory reaches it.
@@ -27,7 +27,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import cm
 
-from crossing_panel import crossing_panel_from_summary, crossing_table, encoding_legend
+from crossing_panel import (DEFAULT_TARGET, crossing_panel_from_summary,
+                            crossing_table, encoding_legend, load_summary, save_figure,
+                            variant_note)
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,28 +38,24 @@ FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
 CMAP_N = cm.viridis
 CMAP_PHI = cm.plasma
-TARGET = 0.9
+TARGET = DEFAULT_TARGET
 
 
-def load_summary(summary_dir):
-    """The three summary frames a panel needs."""
-    return (pd.read_csv(os.path.join(summary_dir, "curves.csv")),
-            pd.read_csv(os.path.join(summary_dir, "crossings.csv")),
-            pd.read_csv(os.path.join(summary_dir, "points.csv")))
-
-
-def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
+def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET,
+                standardized=False):
     setup_plotting_style()
-    curves, crossings, points = load_summary(summary_dir)
+    curves, crossings, points, theory = load_summary(summary_dir)
 
     fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.2))
 
     res_N = crossing_panel_from_summary(
         axes[0], curves, crossings, points, sweep="split_vary_N",
-        cmap=CMAP_N, cbar_label=r"$N$", target=target)
+        cmap=CMAP_N, cbar_label=r"$N$", target=target, theory_table=theory,
+        standardized=standardized)
     res_phi = crossing_panel_from_summary(
         axes[1], curves, crossings, points, sweep="split_vary_phi",
-        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target)
+        cmap=CMAP_PHI, cbar_label=r"$\phi$", target=target, theory_table=theory,
+        standardized=standardized)
 
     for ax in axes:
         ax.set_xlabel(r"$F_{ST}$")
@@ -65,6 +63,8 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     axes[1].set_title(r"varying $\phi$  ($N=200$)")
     encoding_legend(axes[0], target=target, loc="upper left", force_loc=True,
                     show_band=False)
+    for ax in axes:
+        variant_note(ax, standardized)
 
     for ax, letter in zip(axes, "AB"):
         ax.text(-0.14, 1.06, letter, transform=ax.transAxes,
@@ -75,17 +75,20 @@ def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
     # panel B's y-axis label.
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.26)
-    os.makedirs(figure_dir, exist_ok=True)
-    out = os.path.join(figure_dir, "SingleSplitSweeps.pdf")
-    fig.savefig(out, bbox_inches="tight")
-    fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
+    out = save_figure(fig, figure_dir, "SingleSplitSweeps", standardized)
     print(f"wrote {out}")
     print(crossing_table(res_N, "N", "Fst"))
     print(crossing_table(res_phi, "phi", "Fst"))
     return fig
 
 
+def make_all(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
+    """Both versions: the ordinary GRM and the standardized one, same theory marks."""
+    return [make_figure(summary_dir, figure_dir, target, standardized=s)
+            for s in (False, True)]
+
+
 if __name__ == "__main__":
-    make_figure()
+    make_all()
 
 # %%

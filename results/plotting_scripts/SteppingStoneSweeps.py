@@ -48,6 +48,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import cm, colors, lines
 
+from crossing_panel import save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -209,10 +210,10 @@ def make_figure(df, dimension, outpath):
                bbox_to_anchor=(0.5, -0.04))
 
     fig.tight_layout()
-    os.makedirs(os.path.dirname(outpath), exist_ok=True)
-    for ext in ("pdf", "png"):
-        fig.savefig(f"{outpath}.{ext}")
-    print(f"wrote {outpath}.pdf / .png")
+    # outpath is a directory + stem rather than a directory, so it is split back apart
+    # to reach the shared writer (PNG to results/figures, PDF to results/pdf_figs).
+    out = save_figure(fig, os.path.dirname(outpath), os.path.basename(outpath))
+    print(f"wrote {out}")
     return fig
 
 

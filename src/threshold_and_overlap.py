@@ -169,27 +169,60 @@ Then, for a candidate nu_k, compute gamma_eff(nu_k) from the same formula
 formula above.
 
 ================================================================================
-ACCURACY OF THE APPROXIMATE PROCEDURE
+CRUDE PROCEDURE (gamma_eff = N / L_eff)
+================================================================================
+
+Dropping the delta correction from gamma_eff leaves a single constant
+
+    L_eff = (sum_l h_l)^2 / sum_l h_l^2,     gamma_eff = N / L_eff
+
+the inverse participation ratio of the locus weights. Since mu2 = L / L_eff
+identically, N / L_eff == gamma * mu2 exactly, so this is the gamma_eff of the
+approximate procedure with its bracketed [1 + (2 delta / mu2) gamma Phi(nu)] term
+set to 1. The two coincide when delta = 0. L_eff <= L always, with equality iff
+every locus carries the same variance.
+
+Taking eps == 0 on top of that reduces the threshold and overlap to plain BBP at
+the effective aspect ratio:
+
+    nu_c = sqrt(gamma_eff)
+    <u_k, u_hat_k>^2 = (1 - gamma_eff / nu_k^2) / (1 + gamma_eff / nu_k)
+
+This route ignores both eps_a (individual-side heteroskedasticity) and delta
+(the third locus moment). It is the form quoted for the single-split figures and
+is what makes L_eff interpretable as "the number of loci the data is really
+worth"; prefer the exact route when either effect matters.
+
+================================================================================
+ACCURACY OF THE APPROXIMATE PROCEDURES
 ================================================================================
 
 Benchmarked against the exact procedure across realistic site-frequency spectra
 (MAF-filtered and unfiltered; our case is the unfiltered case) and both eps
-regimes, for gamma up to 0.5:
+regimes, for gamma up to 0.5. Figures below are from the appendix derivation and
+are re-measured by misc/test_scripts/test_threshold_methods.py:
 
-  * nu_c: error below ~0.5% at gamma <= 0.05, 1-3% at gamma up to 0.5.
-  * Overlap: error below ~1% for modes with nu_k >~ 2 nu_c; degrades near
-    threshold (nu_k <~ 1.5 nu_c) at large gamma (>~ 0.2), where errors up to
-    ~10-15% are possible -- solve the exact system in that regime.
-  * The approximation relies on eta_l having bounded support, which is guaranteed
-    for genotype data since h_l <= 1/4. It is not expected to be reliable for
+  * nu_c, gamma_eff route: the eps == 0 closed-form cubic root is within ~0.15%
+    of exact at gamma = 0.05, rising to ~1% at gamma = 0.5. The eps != 0
+    three-pass fixed point stays under 1% across gamma in [0.05, 0.5], with no
+    visible degradation as eps grows.
+  * Overlap, gamma_eff route: error below ~1% for modes with nu_k >~ 2 nu_c;
+    degrades near threshold (nu_k <~ 1.5 nu_c) at large gamma (>~ 0.2), where
+    errors up to ~10-15% are possible -- solve the exact system in that regime.
+  * The crude N/L_eff route carries an additional error of order
+    2 delta gamma / mu2 relative to the gamma_eff route, since that is precisely
+    the term it drops, and a further error whenever eps_a is not ~0. It is the
+    least accurate of the three by construction.
+  * Both approximations rely on eta_l having bounded support, which is guaranteed
+    for genotype data since h_l <= 1/4. Neither is expected to be reliable for
     weight distributions with heavy/unbounded tails (e.g. imputation-dosage
     weights) -- validate against the exact procedure if using non-genotype
     weights.
 
-When implementing, always run the eps = 0, eta = 1 sanity check first (recovers
-plain BBP), then check the approximate procedure against the exact procedure on a
-simulated site-frequency spectrum before trusting either on real demographic
-simulations.
+When implementing, always run the eps = 0, eta = 1 sanity check first (all three
+routes must collapse onto plain BBP), then check the approximations against the
+exact procedure on a simulated site-frequency spectrum before trusting any of
+them on real demographic simulations.
 
 ================================================================================
 NOTE ON ALPHA
@@ -208,21 +241,47 @@ the observed scale of S = X X^T / L, via
 API
 ================================================================================
 
-Exact route:   solve_w, exact_nu_c, exact_overlap
-Approximate:   eta_moments, gamma_eff, approx_nu_c, approx_overlap
-Finite-K:      spectrum_psi, is_detectable_spectrum  (N ~ K, stepping-stones)
+Three parallel routes to the same two quantities, most to least accurate. Each is
+a (threshold, overlap) pair; they differ only in what they are given and what they
+neglect, so any structure eigenvalue nu_k can be handed to all three and the
+estimates compared directly.
+
+  1. Exact         exact_nu_c(phi, eps, h, gamma)
+                   exact_overlap(nu_k, phi, eps, h, gamma, nu_c=None)
+     Sums over every locus; neglects nothing. Needs the whole h vector.
+
+  2. gamma_eff     approx_nu_c(phi, eps, gamma, mu2, delta)
+                   approx_overlap(nu_k, phi, eps, gamma, mu2, delta, nu_c=None)
+     Two locus moments from eta_moments(h) in place of the vector. Keeps eps.
+
+  3. Crude         crude_nu_c(N, L_eff)
+                   crude_overlap(nu_k, N, L_eff)
+     One number, L_eff = effective_L(h). Neglects eps and delta both.
+
+INVARIANT: the threshold depends only on N, L, phi_a and eps_a -- never on nu.
+None of the three nu_c functions takes a nu argument, and that is deliberate;
+only the overlaps take nu_k.
+
+Supporting:  eta_moments, effective_L, gamma_eff, Phi, Phi_2, Psi, Psi_2, solve_w
+Finite-K:    spectrum_psi, is_detectable_spectrum  (N ~ K, stepping-stones)
 Observed scale: predicted_eigenvalue
 
+NOTATION: Phi and Psi here are the appendix's Phi_1 and Psi_1; Phi_2 and Psi_2
+match. The subscript 1 is dropped in code since there is no Phi_0 to confuse it
+with.
+
 eps_a == 0 is handled as a special case of the general code path, not a separate
-branch, except in approx_nu_c where the exact cubic root is used.
+branch, except in approx_nu_c where the exact cubic root is used, and in the crude
+route which assumes it throughout.
 """
 import numpy as np
 from scipy.optimize import brentq
 
 __all__ = [
-    "eta_moments", "Phi", "Phi_2", "Psi", "Psi_2",
+    "eta_moments", "effective_L", "Phi", "Phi_2", "Psi", "Psi_2",
     "solve_w", "exact_nu_c", "exact_overlap",
     "gamma_eff", "approx_nu_c", "approx_overlap",
+    "crude_nu_c", "crude_overlap",
     "predicted_eigenvalue",
     "spectrum_psi", "is_detectable_spectrum",
 ]
@@ -278,6 +337,24 @@ def eta_moments(h):
     mu2 = float(np.mean(eta ** 2))
     mu3 = float(np.mean(eta ** 3))
     return mu2, mu3, max(mu3 - mu2 ** 2, 0.0)
+
+
+def effective_L(h):
+    """
+    Variance-effective locus count L_eff = (sum h)^2 / sum h^2, the inverse
+    participation ratio of the per-locus weights.
+
+    L_eff <= L always, with equality iff every locus carries the same variance, so
+    it counts how many equally-weighted loci the heteroskedastic set is worth. The
+    crude route's aspect ratio is N / L_eff, which equals gamma * mu2 identically
+    (mu2 = L / L_eff), so this is a repackaging of eta_moments' first return value
+    rather than independent information.
+
+    pc_recovery.effective_L computes the same quantity from a genotype matrix,
+    deriving h = p(1-p) internally; this one takes the weights directly.
+    """
+    h = _clean_eta(h)
+    return float(h.sum() ** 2 / (h ** 2).sum())
 
 
 # --- the four transforms -------------------------------------------------
@@ -495,6 +572,45 @@ def approx_overlap(nu_k, phi, eps, gamma, mu2, delta, nu_c=None):
     num = 1.0 - ge * Phi_2(nu_k, phi, eps)
     den = 1.0 + ge * Phi(nu_k, phi, eps)
     return float(max(num / den, 0.0))
+
+
+# --- crude procedure (gamma_eff = N / L_eff) -----------------------------
+
+def _crude_gamma_eff(N, L_eff):
+    """N / L_eff, with the argument checks the two crude entry points share."""
+    if N <= 0:
+        raise ValueError(f"N must be positive, got {N:g}")
+    if L_eff <= 0:
+        raise ValueError(f"L_eff must be positive, got {L_eff:g}")
+    return float(N) / float(L_eff)
+
+
+def crude_nu_c(N, L_eff):
+    """
+    Threshold from the crude route: nu_c = sqrt(N / L_eff), plain BBP at the
+    effective aspect ratio.
+
+    Get L_eff from effective_L(h). This drops both eps_a and the delta correction,
+    so it sits below approx_nu_c, which sits below exact_nu_c; expect it to
+    under-report the threshold. Takes no nu, like the other two thresholds.
+    """
+    return float(np.sqrt(_crude_gamma_eff(N, L_eff)))
+
+
+def crude_overlap(nu_k, N, L_eff):
+    """
+    Overlap from the crude route:
+
+        (1 - gamma_eff / nu_k^2) / (1 + gamma_eff / nu_k),   gamma_eff = N / L_eff.
+
+    Returns 0.0 at or below threshold, matching exact_overlap and approx_overlap.
+    No nu_c argument: the threshold is sqrt(gamma_eff), which costs nothing to
+    recompute, so there is nothing to cache across a sweep.
+    """
+    ge = _crude_gamma_eff(N, L_eff)
+    if nu_k <= np.sqrt(ge):
+        return 0.0
+    return float(max((1.0 - ge / nu_k ** 2) / (1.0 + ge / nu_k), 0.0))
 
 
 # --- back to the observed scale ------------------------------------------

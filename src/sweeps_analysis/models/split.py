@@ -82,28 +82,65 @@ def axes(ctx, design, sim_row, cfg):
                            n_a=int(n[0]), n_b=int(n[1])))
 
 
+NU_FORM = "exact_fst"
+
+
+def _n_vector(design):
+    """The per-population sample sizes, from either a recorded cell row or the n vector.
+
+    design is the cell row when called from the summariser and the n vector when called
+    from the runner; n_a/n_b are recorded per cell precisely so the closure can be rebuilt
+    from a CSV row alone.
+    """
+    return (np.array([int(design["n_a"]), int(design["n_b"])])
+            if isinstance(design, dict) else np.asarray(design, dtype=int))
+
+
+def theory_context(ctx, design, sim_row, cfg, measured):
+    """The RMT inputs for this cell, with no nu in them -- nu_c must not depend on Fst."""
+    n = _n_vector(design)
+    N = int(n.sum())
+    try:
+        return dict(phi=n / N, eps=np.zeros(len(n)), h=measured.get("h"),
+                    gamma_raw=float(measured["gamma_raw"]),
+                    mu2=float(measured["mu2"]), delta=float(measured["delta"]),
+                    N=N, L_eff=float(measured["L_eff"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def nu_of_x(ctx, design, sim_row, cfg, measured):
+    """
+    Fst -> nu, the un-approximated K=2 structure eigenvalue.
+
+        nu = 2 N phi_1 phi_2 Fst / (1 - Fst)
+
+    This is eq. (K2_spike) of the appendix at eps == 0, exact for the symmetric split
+    rather than its small-Fst limit 2 N phi_1 phi_2 Fst. The two differ by the factor
+    1/(1-Fst): negligible at the bottom of the swept range and ~2% at the top (Fst=0.025).
+    """
+    n = _n_vector(design)
+    N = int(n.sum())
+    phi_a = float(n[0]) / N
+    return lambda fst: 2.0 * N * phi_a * (1.0 - phi_a) * float(fst) / (1.0 - float(fst))
+
+
 def theory_overlap(ctx, design, sim_row, cfg, measured):
     """
     Fst -> predicted cos^2, via the two-moment route.
 
-    nu = 2*N*phi*(1-phi)*Fst is exact for the symmetric split, so the closure evaluates it
-    directly rather than regressing nu on Fst. gamma_raw/mu2/delta come from what the
-    subsamples actually contained, so nothing here is fitted.
+    nu is exact for the symmetric split, so the closure evaluates it directly rather than
+    regressing nu on Fst. gamma_raw/mu2/delta come from what the subsamples actually
+    contained, so nothing here is fitted.
     """
-    # design is the recorded cell row when called from the summariser, and the n vector
-    # when called from the runner; n_a/n_b are recorded per cell precisely so the closure
-    # can be rebuilt from a CSV row alone.
-    n = (np.array([int(design["n_a"]), int(design["n_b"])])
-         if isinstance(design, dict) else np.asarray(design, dtype=int))
-    N = int(n.sum())
-    phi_a = float(n[0]) / N
-    phi = n / N
-    eps = np.zeros(len(n))
-    gamma_raw = float(measured["gamma_raw"])
-    mu2, delta = float(measured["mu2"]), float(measured["delta"])
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    nu_fn = nu_of_x(ctx, design, sim_row, cfg, measured)
+    if tc is None or nu_fn is None:
+        return None
+    phi, eps = tc["phi"], tc["eps"]
+    gamma_raw, mu2, delta = tc["gamma_raw"], tc["mu2"], tc["delta"]
     nu_c = approx_nu_c(phi, eps, gamma_raw, mu2, delta)
 
     def overlap(fst):
-        nu = 2.0 * N * phi_a * (1.0 - phi_a) * float(fst)
-        return approx_overlap(nu, phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
+        return approx_overlap(nu_fn(fst), phi, eps, gamma_raw, mu2, delta, nu_c=nu_c)
     return overlap

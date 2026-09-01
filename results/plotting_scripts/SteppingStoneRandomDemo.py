@@ -34,6 +34,7 @@ import pandas as pd
 from matplotlib import cm
 from matplotlib.patches import Circle
 
+from crossing_panel import save_figure
 from plotting_style import setup_plotting_style
 from RecentSpatialDemography import grid_color
 
@@ -186,10 +187,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
                    rf"2D stepping-stones (${K_2d} \times {K_2d}$ demes, "
                    rf"$M={M_2d:.0f}$)", pad=0.025)
 
-    os.makedirs(figure_dir, exist_ok=True)
-    out = os.path.join(figure_dir, "SteppingStoneRandomDemo.pdf")
-    fig.savefig(out, bbox_inches="tight")
-    fig.savefig(out.replace(".pdf", ".png"), dpi=300, bbox_inches="tight")
+    out = save_figure(fig, figure_dir, "SteppingStoneRandomDemo")
     print(f"wrote {out}")
     return fig
 

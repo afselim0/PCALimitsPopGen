@@ -258,6 +258,34 @@ def strided_structure_eigenvalues(K, M, n_per_deme, p, dimension=1, Ne=100.0):
     return w[:k] * M_ref / M
 
 
+def replicate_structure_eigenvalues(K, M, n_per_deme, demes, dimension=1, k=None,
+                                    Ne=100.0):
+    """
+    The leading structure eigenvalue(s) for ONE explicitly given deme subset.
+
+    subsampled_structure_eigenvalues defines nu(n, M, K, phi) as the median over 16 random
+    subsets, because a fraction does not on its own name a sampling scheme. That is the
+    right definition for a curve, but not for a single replicate: each replicate draws one
+    particular subset, and different subsets of the same size give genuinely different nu.
+    This evaluates the subset in hand, so a per-replicate measurement can be paired with
+    the theory for the demography it actually sampled.
+
+    Same generic route as the strided and subsampled cases -- T on the sampled demes from
+    the full-lattice resistance distance, top k eigenvalues of compute_F_hat, rescaled by
+    1/M -- and it reproduces the closed form exactly when every deme is present.
+    """
+    k = (1 if dimension == 1 else 2) if k is None else int(k)
+    demes = np.asarray(demes, dtype=int)
+    if len(demes) < k + 1:
+        raise ValueError(f"{len(demes)} demes is too few for {k} structure axes")
+
+    M_ref = 1.0
+    T = _lattice_T(K, dimension, Ne, M_ref)[np.ix_(demes, demes)]
+    n = np.full(len(demes), float(n_per_deme))
+    w = np.sort(np.linalg.eigvalsh(compute_F_hat(T, n)))[::-1]
+    return w[:k] * M_ref / M
+
+
 def full_spectrum(K, M, n_per_deme, dimension=1):
     """
     Structure eigenvalues followed by the N - K_demes floor levels.

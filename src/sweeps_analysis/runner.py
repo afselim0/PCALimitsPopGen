@@ -102,7 +102,9 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
         row[cfg["sampling"]["vary"]["param"]] = level
 
         for key in ("N", "K", "k", "L_raw", "L_eff", "gamma", "gamma_raw", "mu2", "delta",
-                    "median_cos", "se_cos", "analytical_cos", "procrustes_d",
+                    "median_cos", "se_cos", "median_cos_std", "se_cos_std",
+                    "median_lam", "median_lam_bulk", "median_nu_hat",
+                    "analytical_cos", "procrustes_d",
                     "se_procrustes", "num_replicates", "seed"):
             if key in res:
                 row[key] = res[key]
@@ -128,7 +130,21 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
 
         # replicate_rows re-adds the x column per row, so it must not also sit in base.
         base = {k: v for k, v in row.items() if k not in ("x", model.X_KEY)}
-        reps = replicate_rows(base, row["x"], "x", res["cos_replicates"], seed=seed)
+        # Quantities recorded per replicate. The sample eigenvalues are always
+        # per-replicate; nu joins them only on the random-deme path, where each replicate
+        # draws its own deme subset.
+        per_rep = {}
+        if res.get("nu_replicates") is not None:
+            per_rep["nu"] = res["nu_replicates"]
+        for key, col in (("lam_replicates", "lam"),
+                         ("lam_bulk_replicates", "lam_bulk"),
+                         ("nu_hat_replicates", "nu_hat")):
+            if res.get(key) is not None:
+                per_rep[col] = res[key]
+        per_rep = per_rep or None
+        reps = replicate_rows(base, row["x"], "x", res["cos_replicates"], seed=seed,
+                              cos_std_per_replicate=res.get("cos_replicates_std"),
+                              per_replicate_cols=per_rep)
         for r in reps:
             r[model.X_KEY] = r["x"]
         rep_rows.extend(reps)

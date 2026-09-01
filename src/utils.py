@@ -35,6 +35,39 @@ def compute_sample_covariance(Z, mean_normalize=True):
     return G
 
 
+def compute_standardized_covariance(Z):
+    """
+    Sample GRM with every column standardized to unit variance: Zs = (Z - p)/sqrt(p(1-p)).
+
+    compute_sample_covariance builds the GRM from unnormalized genotypes, so locus l enters
+    with weight h_l = p_l(1-p_l) and the bulk is governed by gamma_eff = N/L_eff. Dividing
+    each column by its standard deviation gives every locus equal weight instead, so the
+    aspect ratio is exactly gamma = N/L and the heteroskedastic locus-side machinery in
+    src/threshold_and_overlap.py collapses to plain BBP.
+
+    Monomorphic columns are dropped first: sqrt(p(1-p)) is zero there and they carry no
+    signal. The trace rescaling puts the bulk at 1, matching the mean_normalize convention
+    of compute_sample_covariance, so nu = lambda/floor - 1 is on the same scale in both.
+
+    p and sd are cast to Z's dtype before the subtraction: mixing a float32 Z with a
+    float64 p silently promotes the whole (n, L) array and doubles peak memory.
+    """
+    Z = np.asarray(Z)
+    p = Z.mean(axis=0, dtype=np.float64)
+    poly = (p > 0) & (p < 1)
+    Z, p = Z[:, poly], p[poly]
+    n, L = Z.shape
+    if L == 0:
+        raise ValueError("no polymorphic loci: cannot standardize")
+
+    sd = np.sqrt(p * (1.0 - p)).astype(Z.dtype, copy=False)
+    Zs = (Z - p.astype(Z.dtype, copy=False)[None, :]) / sd[None, :]
+
+    Zs = Zs - Zs.mean(axis=0, keepdims=True)          # H @ Zs
+    G = (Zs @ Zs.T) / L
+    return np.asarray(G, dtype=np.float64) / (np.trace(G) / n)
+
+
 def compute_expected_covariance(T, mean_normalize=True):
     """
     E[GRM] from a sample-level mean pairwise coalescent time matrix T
@@ -54,32 +87,80 @@ def _sampling_populations(demography):
     return pops
 
 
-def _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_progress):
+DEFAULT_MU = 5e-7
+
+
+def _tree_branches(tree):
+    """Ancestral nodes of a tree and their subtending branch lengths."""
+    nodes, lengths = [], []
+    for u in tree.nodes():
+        bl = tree.branch_length(u)
+        if bl > 0:
+            nodes.append(u)
+            lengths.append(bl)
+    return nodes, np.array(lengths)
+
+
+def _batch_size(remaining, accepted, drawn, default_rate=0.10):
+    """
+    How many trees to request for the next msprime batch.
+
+    Acceptance is 1 - exp(-mu * T_tot), roughly 7-19% at mu = 5e-7, so a batch must
+    over-draw by roughly its reciprocal. The rate is estimated from the trees drawn so
+    far (falling back to a conservative default before there is any data) and capped so
+    one batch never balloons.
+    """
+    rate = accepted / drawn if drawn > 0 and accepted > 0 else default_rate
+    return int(min(max(remaining / rate * 1.2, 1000), 2_000_000))
+
+
+def _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_progress,
+                              mu=DEFAULT_MU):
     """Simulate L independent biallelic SNPs for one chunk (one process/seed)."""
-    ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
-                                    random_seed=random_seed, num_replicates=L,
-                                    sequence_length=1, ploidy=2)
-    n_tot = 2*sum(samples_dict.values())
+    n_tot = 2 * sum(samples_dict.values())
     haplotypes = np.zeros((n_tot, L), dtype=np.bool_)
     rng = np.random.default_rng(random_seed)
-    for i, ts in tqdm(enumerate(ts_samples), total=L, disable=not show_progress):
-        tree = ts.first()
-        nodes, ancestral_branch_lengths = [], []
-        for u in tree.nodes():
-            bl = tree.branch_length(u)
-            if bl > 0:
-                nodes.append(u)
-                ancestral_branch_lengths.append(bl)
-        ancestral_branch_lengths = np.array(ancestral_branch_lengths)
-        probabilities = ancestral_branch_lengths / np.sum(ancestral_branch_lengths)
-        mutation_node = rng.choice(nodes, p=probabilities)
-        haplotypes[np.array(list(tree.leaves(mutation_node))), i] = True
+
+    i = 0
+    seed = random_seed
+    accepted = drawn = 0
+    bar = tqdm(total=L, disable=not show_progress)
+    while i < L:
+        seed += 1
+        ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
+                                          random_seed=seed,
+                                          num_replicates=_batch_size(L - i, accepted, drawn),
+                                          sequence_length=1, ploidy=2)
+        for ts in ts_samples:
+            tree = ts.first()
+            # Infinite sites: the tree is hit at all with probability 1 - exp(-mu * T_tot).
+            # Applied directly -- no rescaling constant, no bound -- so a tree is mutated
+            # at exactly this mu's rate. Tested against the tree's own total_branch_length
+            # so unmutated trees cost no per-branch Python work.
+            drawn += 1
+            if rng.random() >= -np.expm1(-mu * tree.total_branch_length):
+                continue
+            accepted += 1
+            nodes, branch_lengths = _tree_branches(tree)
+            mutation_node = rng.choice(nodes, p=branch_lengths / branch_lengths.sum())
+            haplotypes[np.array(list(tree.leaves(mutation_node))), i] = True
+            i += 1
+            bar.update(1)
+            if i == L:
+                break
+    bar.close()
     return haplotypes
 
 
 def simulate_haplotypes(demography, n=100, L=int(1e6), random_seed=42, n_workers=1,
-                         show_progress=True):
-    """Simulate L independent biallelic SNPs by placing a random mutation on a random tree generated from a specified demography
+                         show_progress=True, mu=DEFAULT_MU):
+    """Simulate L independent biallelic SNPs under an infinite-sites mutation model.
+
+    Trees are drawn from the demography and a tree is ascertained as a SNP with
+    probability exactly 1 - exp(-mu * T_tot), so deeper trees contribute more SNPs; the
+    mutation is then placed on a branch in proportion to its length. L counts ascertained
+    SNPs, so replicates are drawn until L of them are accepted -- at mu = 5e-7 acceptance
+    runs 7-19%, i.e. 5-15 trees per SNP.
 
     Args:
         n (int or dict, optional): number of diploid individuals per population. A scalar
@@ -93,57 +174,83 @@ def simulate_haplotypes(demography, n=100, L=int(1e6), random_seed=42, n_workers
             (serial, same behavior/output as before).
         show_progress (bool, optional): show a tqdm bar over the L replicates. Defaults to True;
             set False when the caller already tracks progress at a coarser level.
+        mu (float, optional): per-site per-generation mutation rate setting the
+            per-tree ascertainment probability. Defaults to 5e-7.
     """
     if isinstance(n, dict):
-        samples_dict = {pop: int(n[pop]) for pop in _sampling_populations(demography)}
+        # Only the populations the caller asked for: a demography may mark an ancestral
+        # population as sampleable (african_split forces YRI initially_active to work
+        # around a demes export bug) without it being one of the sampled populations.
+        samples_dict = {pop: int(n[pop]) for pop in _sampling_populations(demography)
+                        if pop in n}
+        missing = set(n) - set(samples_dict)
+        if missing:
+            raise KeyError(f"requested populations not sampleable in demography: {sorted(missing)}")
     else:
         samples_dict = {pop: int(n) for pop in _sampling_populations(demography)}
 
     if n_workers <= 1:
-        return _simulate_haplotype_chunk(demography, samples_dict, L, random_seed, show_progress)
+        return _simulate_haplotype_chunk(demography, samples_dict, L, random_seed,
+                                         show_progress, mu)
 
     n_workers = min(n_workers, L)
     chunk_sizes = np.diff(np.linspace(0, L, n_workers + 1).astype(int))
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futures = [
             ex.submit(_simulate_haplotype_chunk, demography, samples_dict,
-                      int(chunk_L), random_seed + w, show_progress and w == 0)
+                      int(chunk_L), random_seed + w, show_progress and w == 0, mu)
             for w, chunk_L in enumerate(chunk_sizes) if chunk_L > 0
         ]
         chunks = [f.result() for f in futures]
     return np.concatenate(chunks, axis=1)
 
-def _simulate_counts_chunk(demography, samples_dict, L, random_seed, show_progress):
+def _simulate_counts_chunk(demography, samples_dict, L, random_seed, show_progress,
+                           mu=DEFAULT_MU):
     """Derived allele *count* for L independent SNPs, without building the genotype matrix."""
-    ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
-                                      random_seed=random_seed, num_replicates=L,
-                                      sequence_length=1, ploidy=2)
     counts = np.zeros(L, dtype=np.int32)
     rng = np.random.default_rng(random_seed)
-    for i, ts in tqdm(enumerate(ts_samples), total=L, disable=not show_progress):
-        tree = ts.first()
-        nodes, ancestral_branch_lengths = [], []
-        for u in tree.nodes():
-            bl = tree.branch_length(u)
-            if bl > 0:
-                nodes.append(u)
-                ancestral_branch_lengths.append(bl)
-        ancestral_branch_lengths = np.array(ancestral_branch_lengths)
-        probabilities = ancestral_branch_lengths / np.sum(ancestral_branch_lengths)
-        mutation_node = rng.choice(nodes, p=probabilities)
-        # The genotype column is the indicator of this node's leaf set, so its derived
-        # allele count is just how many leaves it has -- no need to materialize the column.
-        counts[i] = tree.num_samples(mutation_node)
+
+    i = 0
+    seed = random_seed
+    accepted = drawn = 0
+    bar = tqdm(total=L, disable=not show_progress)
+    while i < L:
+        seed += 1
+        ts_samples = msprime.sim_ancestry(demography=demography, samples=samples_dict,
+                                          random_seed=seed,
+                                          num_replicates=_batch_size(L - i, accepted, drawn),
+                                          sequence_length=1, ploidy=2)
+        for ts in ts_samples:
+            tree = ts.first()
+            # Infinite sites: the tree is hit at all with probability 1 - exp(-mu * T_tot).
+            # Applied directly -- no rescaling constant, no bound -- so a tree is mutated
+            # at exactly this mu's rate. Tested against the tree's own total_branch_length
+            # so unmutated trees cost no per-branch Python work.
+            drawn += 1
+            if rng.random() >= -np.expm1(-mu * tree.total_branch_length):
+                continue
+            accepted += 1
+            nodes, branch_lengths = _tree_branches(tree)
+            mutation_node = rng.choice(nodes, p=branch_lengths / branch_lengths.sum())
+            # The genotype column is the indicator of this node's leaf set, so its derived
+            # allele count is just how many leaves it has -- no need to materialize the column.
+            counts[i] = tree.num_samples(mutation_node)
+            i += 1
+            bar.update(1)
+            if i == L:
+                break
+    bar.close()
     return counts
 
 
 def simulate_allele_counts(demography, n=100, L=int(1e6), random_seed=42, n_workers=1,
-                           show_progress=True):
+                           show_progress=True, mu=DEFAULT_MU):
     """
     Derived allele counts for L independent biallelic SNPs, one integer per SNP.
 
-    Same model as simulate_haplotypes -- one mutation placed on a random ancestral branch
-    of each independent tree -- but records only how many samples carry the derived allele
+    Same model as simulate_haplotypes -- trees ascertained with probability
+    1 - exp(-mu * T_tot), then one mutation placed on a branch in proportion to its
+    length -- but records only how many samples carry the derived allele
     rather than which ones. For any quantity that depends on the genotype matrix solely
     through its column allele frequencies (L_eff and the site frequency spectrum, for
     instance) this is exactly equivalent and costs O(L) storage instead of O(N * L): at
@@ -153,6 +260,7 @@ def simulate_allele_counts(demography, n=100, L=int(1e6), random_seed=42, n_work
         n: diploid individuals per population; each contributes 2 haploid samples.
         L: number of independent SNPs.
         n_workers: processes to split the L replicates across.
+        mu: per-site per-generation mutation rate setting the ascertainment probability.
 
     Returns:
         (counts, n_haploid): the length-L int32 array of derived allele counts, and the
@@ -163,14 +271,14 @@ def simulate_allele_counts(demography, n=100, L=int(1e6), random_seed=42, n_work
 
     if n_workers <= 1:
         return _simulate_counts_chunk(demography, samples_dict, L, random_seed,
-                                      show_progress), n_haploid
+                                      show_progress, mu), n_haploid
 
     n_workers = min(n_workers, L)
     chunk_sizes = np.diff(np.linspace(0, L, n_workers + 1).astype(int))
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futures = [
             ex.submit(_simulate_counts_chunk, demography, samples_dict,
-                      int(chunk_L), random_seed + w, show_progress and w == 0)
+                      int(chunk_L), random_seed + w, show_progress and w == 0, mu)
             for w, chunk_L in enumerate(chunk_sizes) if chunk_L > 0
         ]
         chunks = [f.result() for f in futures]

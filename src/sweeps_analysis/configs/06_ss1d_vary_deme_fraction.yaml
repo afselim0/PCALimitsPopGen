@@ -8,6 +8,10 @@ name: ss1d_vary_deme_fraction
 simdir: results/simulations/stepping_stone_1d/K25
 
 n_replicates: 8
+# Each replicate draws its own deme subset, so nu is a property of the replicate and
+# not of the cell: the summary is one joint table rather than an empirical/theory pair.
+per_replicate_theory: true
+
 seed: 0
 
 fixed:

@@ -49,7 +49,7 @@ from sweeps import ANALYSIS_ROOT
 DEFAULT_NAME = "RecentSpatialDemography"
 M_LABELS = ("weak", "intermediate", "strong")
 DEFAULT_PHI = 0.5          # B's total share of N (CLAUDE.md's convention, matches figure 13)
-DEFAULT_N_TOTAL = 500
+DEFAULT_N_TOTAL = 1000
 DEFAULT_L = 10000        # ~11.6k loci still segregate at N=500; 20k were simulated
 
 

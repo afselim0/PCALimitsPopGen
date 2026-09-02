@@ -79,9 +79,14 @@ def _submit(sbatch_path, dependency=None):
     return job_id
 
 
-def submit_all(paths):
-    """Submit the array, then the aggregate job depending on it."""
+def submit_all(paths, array_dependency=None):
+    """
+    Submit the array, then the aggregate job depending on it.
+
+    array_dependency chains the array itself behind an upstream job -- the OOA3 configs
+    use it to wait on the stage-0 coalescent-time array, whose cache their prepare() reads.
+    """
     array_path, aggregate_path = paths
-    array_id = _submit(array_path)
+    array_id = _submit(array_path, dependency=array_dependency)
     _submit(aggregate_path, dependency=array_id)
     return array_id

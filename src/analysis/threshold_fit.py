@@ -24,6 +24,9 @@ This is one fit, not two: `c` and `beta` are solved in closed form at each candi
 leaving a one-dimensional profile search over `tau`. The search is a grid, not an
 optimizer, because RSS is non-smooth in `tau` -- points switch segments discretely
 (Hinkley 1969; Chiu, Lockhart & Routledge 2006 for the flat-then-rising "bent cable").
+Every candidate uses the same basis and the same criterion (weighted RSS), so nothing in
+the comparison depends on which hypothesis is being tested. Whether a curve has a plateau
+at all is decided separately and directly from the data -- see `below_noise_floor`.
 
 Two estimands come off the SAME fitted curve, so the drawn line and the reported numbers
 can never disagree:
@@ -54,9 +57,33 @@ measurably. Judged against x_c, tau looks 1.3-2.0x "wrong"; against the onset it
 0.93-1.03. For K=2 the two nearly coincide, which is why this only shows up in the sister
 case.
 
-`lam` is not a tuned knob: tau moves by <6% over a 16x range of it (2 -> 32). Nothing here
-uses the theoretical curve or the BBP closed form, so the fitted transition is an
-independent measurement rather than a restatement of the theory it is checked against.
+`lam` has a floor, not a sweet spot. It must be big enough that the arm cannot bend at its
+own origin and absorb the elbow; past that tau is insensitive to it. Pooled tau/onset over
+the split and OOA3 sweeps: 0.35 (lam=0), 0.80 (0.25), 0.92 (1), 0.95 (2), 0.97 (4),
+1.00 (8), 1.01 (16), 1.02 (32). Below ~4 the break slides left into the plateau; from ~8 up
+it is stable. The crossing does not care at all (0.98-1.02 across that whole range), and
+neither does the no-plateau verdict (22/22 everywhere) -- the penalty buys the BREAK, not
+smoothness of the drawn line.
+
+That stiffness requirement is what rules out a flexible arm generally, not just a small
+`lam`. A plain isotonic (PAVA) right arm removes lam, the knots and the basis in one step,
+but it interpolates: with n distinct u it has up to n free levels, so sliding tau left
+costs nothing and the break is unidentified. It recovers tau/onset 0.23 on the real sweeps
+and 0.56 on SYNTHETIC data with a known sharp break, against 1.04 for this arm. The RSS
+profile shows why: isotonic's minimum sits at 5.9e-4 on a curve whose onset is 1.03e-3.
+
+Nothing here uses the theoretical curve or the BBP closed form, so the fitted transition is
+an independent measurement rather than a restatement of the theory it is checked against.
+
+CAVEAT, worth carrying into any writeup: against synthetic curves with a KNOWN break this
+estimator reads ~3% high with a sharp corner and 12-45% high once the corner is soft and
+the sub-threshold segment drifts -- the regime the real sweeps sit in. The close agreement
+with theory on real data (0.996) therefore involves some cancellation between that upward
+bias and where the theoretical onset is defined. tau is a location estimate with a few
+percent of systematic uncertainty, not a sharply identified threshold; the softness is
+physical (the theory's own cos^2 leaves zero smoothly, and finite N smears it further),
+not an artifact of the fit. Holding lam fixed and varying the true break gives a slope of
+0.88 in log-log with correlation 0.998, so tau does track the data rather than the tuning.
 
 Depends only on numpy/scipy -- no R, rpy2 or scam.
 """
@@ -122,8 +149,20 @@ def _fit_arm(u, y, w, n_basis=DEFAULT_N_BASIS, lam=DEFAULT_LAM, degree=3):
     return coef, knots, B @ coef, int((coef > 1e-10).sum())
 
 
-def replicate_weights(t, y, n_bin=25, floor_frac=0.05):
-    """Inverse-variance weights from the local spread of replicates in log x."""
+def replicate_weights(t, y, n_bin=20, floor_frac=0.05):
+    """
+    Inverse-variance weights from the local spread of replicates in log x.
+
+    `n_bin` sits on the plateau of its own sensitivity curve. Accuracy improves
+    monotonically with resolution and then stops: pooled tau/onset over the 39 split and
+    OOA3 curves runs 0.919 (5 bins), 0.957 (10), 0.980 (15), 0.996 (20), 1.006 (25),
+    1.008 (40). Too few bins average the variance over a wide stretch of x, smearing the
+    150x range into a coarse step function and blunting the weight contrast -- which
+    reverts partway towards unweighted least squares and biases tau low, the same failure
+    weighting exists to prevent. Past ~20 there is nothing left to gain (20 -> 40 moves the
+    mean by 0.012 and the sd by 0.000). At ~800 replicates per curve, 20 bins leaves ~40
+    points each, well above what a variance estimate needs.
+    """
     edges = np.unique(np.quantile(t, np.linspace(0, 1, n_bin + 1)))
     if len(edges) < 3:
         return np.ones_like(y)
@@ -138,46 +177,72 @@ def replicate_weights(t, y, n_bin=25, floor_frac=0.05):
     return 1.0 / var
 
 
-def _profile(t, y, w, grid, n_basis, lam, min_left, min_right):
-    """
-    Profile the weighted GCV over the break. Returns (gcv, rss, tau, c, coef, knots).
+NOISE_FLOOR = 0.15
 
-    The candidate set includes tau below every observation: a sweep that begins above its
-    transition has NO plateau, and forcing one makes the model flatten a genuinely rising
-    left segment and report a break that is an artifact of `min_left`. That no-plateau
-    candidate has one parameter fewer (no plateau level to estimate), so GCV chooses it on
-    equal terms; its tau is a bound (the transition is below the swept range), which
-    `tau_below_range` records.
+
+def below_noise_floor(x, y, n_levels=3, floor=NOISE_FLOOR):
     """
-    n = len(y)
+    Does this curve start at the finite-N noise floor, i.e. is its transition inside the
+    swept range?
+
+    Returns True when the curve is ALREADY detecting at the smallest swept x -- the median
+    over its lowest `n_levels` x values sits above `floor` -- so the transition lies below
+    the data and tau is a bound rather than a measurement.
+
+    This is a property of the data, deliberately not of the fit. The alternative, letting
+    the no-plateau candidate win or lose on fit, does not work once every candidate shares
+    a basis: over the 22 stepping-stone curves the two hypotheses are separated by RSS on
+    only ~15, and raising the basis count to help buys nothing (the errors are all "claims
+    a plateau", never the reverse) while degrading tau on the split sweeps from 1.01 to
+    0.72. Making the call explicitly on the data keeps the estimator symmetric.
+
+    `floor` is a convention, not a derived constant, and is stated as one. The physically
+    motivated alternative -- the chance-alignment level k/N for a random unit vector -- is
+    the right order for the split and OOA3 sweeps (measured plateau is 0.3-5.4x k/N) but
+    does not separate the stepping-stone curves (0.4x to 1170x, overlapping), and the
+    measured sub-threshold floor is known not to follow the 1/N scaling anyway: it sits
+    flat at ~0.005 regardless of N. 0.15 sits in a wide gap for these sweeps -- curves with
+    a real plateau start at 0.01-0.12, curves past their transition at 0.17-0.73 -- but it
+    is a reporting choice about when tau is worth quoting, not a detected physical level.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    lv = np.unique(x)[:max(int(n_levels), 1)]
+    lead = y[np.isin(x, lv)]
+    return bool(lead.size and float(np.median(lead)) > floor)
+
+
+def _profile(t, y, w, grid, n_basis, lam, min_left, min_right, no_plateau=False):
+    """
+    Profile the weighted RSS over the break. Returns (rss, rss, tau, c, coef, knots).
+
+    Every candidate -- including tau below all the data -- is fitted with the SAME basis
+    and scored by the same criterion, so nothing about the comparison depends on which
+    hypothesis is being tested.
+
+    The no-plateau candidate (tau below every observation) matters because a sweep that
+    begins above its transition has no plateau at all, and forcing one makes the model
+    flatten a genuinely rising left segment and report a break that is an artifact of
+    `min_left`. Whether that candidate wins is NOT how the pipeline decides a curve has no
+    plateau, though: that call is made directly from the data (see `below_noise_floor`),
+    because with a common basis the two hypotheses are not reliably separated by fit alone.
+
+    Raw RSS rather than GCV. GCV was here to charge the no-plateau candidate for having one
+    parameter fewer, but with a common basis the two criteria pick the same tau on 38 of 39
+    split/OOA3 curves and 22 of 23 stepping-stone curves, so the correction earns nothing.
+    """
     best = None
 
-    # Candidate 0: NO PLATEAU -- the curve rises across the whole swept range because its
-    # transition lies below it. Without this candidate the model must invent a break, and
-    # with the arm too stiff to follow a full-range rise it "fits" one by flattening the
-    # part the arm cannot reach: the 1D stepping-stone sweeps came out with a plateau at
-    # cos^2 ~ 0.7 and a break that was an artifact of min_left.
-    #
-    # The arm gets more basis functions HERE ONLY, because it has to span the entire range
-    # rather than just the part above a break. That extra flexibility must not be offered
-    # to the interior-break candidates: there it lets the arm absorb the elbow itself, and
-    # the break drifts low and noisy (tau/onset 1.00 -> 0.72 on the split and OOA3 sweeps).
-    # Stiff arm for locating a break; flexible arm only when there is no break to locate.
     tau0 = t.min() - 1e-9
     c0 = float(np.average(y[:min_left], weights=w[:min_left]))
-    for nb in (n_basis, 16, 24):
-        coef, knots, pred, k = _fit_arm(t - tau0, y - c0, w, nb, lam)
-        # Only admit it if the arm is genuinely climbing where the data begins. A flexible
-        # arm can also imitate a flat start, and then it would win on GCV over a real
-        # plateau purely by having one parameter fewer -- which is what happened to
-        # african_split N=200 (a true plateau at cos^2 = 0.01 read as no plateau).
-        lead = pred[t <= np.quantile(t, 0.1)]
-        if lead.size < 2 or (lead[-1] - lead[0]) < 0.02:
-            continue
-        rss = (w * (y - c0 - pred) ** 2).sum()
-        gcv = n * rss / max((n - (1 + k)) ** 2, 1)
-        if best is None or gcv < best[0]:
-            best = (gcv, rss, tau0, c0, coef, knots)
+    coef, knots, pred, _ = _fit_arm(t - tau0, y - c0, w, n_basis, lam)
+    rss0 = (w * (y - c0 - pred) ** 2).sum()
+    best = (rss0, rss0, tau0, c0, coef, knots)
+    if no_plateau:
+        # The data already say the curve starts above the noise floor, so a plateau is not
+        # on the table: return the no-plateau fit rather than letting an interior break win
+        # on a hair of RSS and draw a flat segment partway up the rise.
+        return best
 
     for tau in grid:
         left = t <= tau
@@ -185,15 +250,12 @@ def _profile(t, y, w, grid, n_basis, lam, min_left, min_right):
         if right.sum() < min_right or left.sum() < min_left:
             continue
         c = float(np.average(y[left], weights=w[left]))
-        coef, knots, pred, k = _fit_arm(t[right] - tau, y[right] - c, w[right],
+        coef, knots, pred, _ = _fit_arm(t[right] - tau, y[right] - c, w[right],
                                         n_basis, lam)
         rss = (w[left] * (y[left] - c) ** 2).sum() + \
               (w[right] * (y[right] - c - pred) ** 2).sum()
-        # GCV rather than raw RSS: a shorter right segment buys freedom that RSS alone
-        # would reward, which biases the break.
-        gcv = n * rss / max((n - (2 + k)) ** 2, 1)
-        if best is None or gcv < best[0]:
-            best = (gcv, rss, tau, c, coef, knots)
+        if rss < best[0]:
+            best = (rss, rss, tau, c, coef, knots)
     return best
 
 
@@ -235,8 +297,14 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
     t = np.log(x)
     w = replicate_weights(t, y) if weighted else np.ones_like(y)
 
+    # Decide from the DATA whether this curve has a plateau at all, then fit accordingly.
+    # The verdict has to reach the fit, not just the reported flag: on ss1d n=4 the interior
+    # break beat the no-plateau candidate by 1.02x in RSS and the drawn curve carried a flat
+    # segment at cos^2 = 0.75, which is exactly the artifact the flag exists to rule out.
+    below_range = below_noise_floor(x, y)
     grid = np.linspace(np.quantile(t, lo_q), np.quantile(t, hi_q), n_grid)
-    best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right)
+    best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right,
+                    no_plateau=below_range)
     if best is None:
         return None
     _, rss, tau, c, coef, knots = best
@@ -248,18 +316,13 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
 
     y_lo, y_hi, tau_lo, tau_hi = _bootstrap(
         t, y, w, grid, x_grid, n_basis, lam, min_left, min_right, n_boot, level, seed,
-        n_jobs)
+        n_jobs, no_plateau=below_range)
 
-    # Is the segment below the break actually flat? The model always returns some break,
-    # so a sweep that begins above its transition gets one partway up the rise; the flag
-    # separates that from a real plateau. See transition_with_ci.
-    # The no-plateau candidate won: the curve rises across the whole swept range, so its
-    # transition lies below the data and tau is a bound rather than a measurement.
-    below_range = bool(tau <= t.min())
     mask = t <= tau
     rho = np.nan
     if mask.sum() >= 8:
         rho = float(spearmanr(t[mask], y[mask]).statistic)
+
 
     return dict(x_grid=x_grid, y_fit=y_fit,
                 y_lo=y_lo if y_lo is not None else y_fit,
@@ -272,12 +335,20 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
 
 
 def _boot_one(args):
-    """One bootstrap resample: refit the whole model and return its curve and break."""
-    (t, y, w, grid, x_grid, n_basis, lam, min_left, min_right, s) = args
+    """One bootstrap resample: refit the whole model and return its curve and break.
+
+    `no_plateau` is carried over from the point estimate rather than re-decided per
+    resample: the band has to describe the uncertainty of the model that was actually
+    fitted. Letting resamples pick an interior break for a curve fitted without one drew a
+    band around a different model, which put the fitted line outside its own band on 28% of
+    the grid for ss1d n=64.
+    """
+    (t, y, w, grid, x_grid, n_basis, lam, min_left, min_right, s, no_plateau) = args
     rng = np.random.default_rng(s)
     n = len(y)
     idx = np.sort(rng.integers(0, n, n))
-    b = _profile(t[idx], y[idx], w[idx], grid, n_basis, lam, min_left, min_right)
+    b = _profile(t[idx], y[idx], w[idx], grid, n_basis, lam, min_left, min_right,
+                 no_plateau=no_plateau)
     if b is None:
         return None
     _, _, tb, cb, coefb, knotsb = b
@@ -285,7 +356,7 @@ def _boot_one(args):
 
 
 def _bootstrap(t, y, w, grid, x_grid, n_basis, lam, min_left, min_right,
-               n_boot, level, seed, n_jobs=None):
+               n_boot, level, seed, n_jobs=None, no_plateau=False):
     """Resample replicates and refit the whole model, tau included.
 
     Parallel over resamples: one profile is ~0.6 s, so a serial bootstrap would dominate.
@@ -293,8 +364,8 @@ def _bootstrap(t, y, w, grid, x_grid, n_basis, lam, min_left, min_right,
     if not n_boot:
         return None, None, np.nan, np.nan
     n_boot = int(n_boot)
-    jobs = [(t, y, w, grid, x_grid, n_basis, lam, min_left, min_right, seed + 1 + i)
-            for i in range(n_boot)]
+    jobs = [(t, y, w, grid, x_grid, n_basis, lam, min_left, min_right, seed + 1 + i,
+             no_plateau) for i in range(n_boot)]
     # Serial by default: one resample is ~0.16 s, so process startup eats most of the
     # gain (48 s serial against 35 s on 16 workers, n_boot=100). The pipeline parallelises
     # across curves instead, which is the granularity that actually pays.

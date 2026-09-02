@@ -12,23 +12,23 @@ n_replicates: 8
 seed: 0
 
 fixed:
-  L: 50000
-  L_polymorphic: false   # as the existing driver: the exact-width path would materialise
-                         # a full-width slice of a 4 GB .npy
+  L: 20000
+  # Exact width, so gamma is fixed across the sweep. Feasible with large margin: the
+  # smallest cell (N=100) still leaves 37k polymorphic columns.
+  L_polymorphic: true
 
 sampling:
-  # Each sister at 20% of N, so H = 0.20 throughout. Raised from 0.05: at H = 0.05 the
-  # exact nu tops out at 1.67 across the whole Fst range, so every curve plateaued near
-  # cos^2 = 0.78 and never reached the 0.9 detection target -- the sweep had no crossing
-  # to report. nu scales linearly in H, so 0.20 lifts nu_max to ~6.7 and puts the phase
-  # transition inside the grid, which is the point of the figure.
   fixed: {phi_sister: 0.20}
   vary:
     param: N
-    values: [200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    values: [100, 200, 400, 800, 1600]
 
 cluster:
-  job_name: sw_ooa3_N
-  time: "02:00:00"   # ~20 min coalescent integration + 9 cells of subsample/eigh
-  mem: 6G            # 4 GB .npy is mmap'd, not resident; measured peak on split was 1.9G
+  job_name: sweep_ooa3_N
+  # The 15-20 min coalescent integration is no longer paid here -- precompute_coal_times.py
+  # computes it once per t_split as a stage-0 array and prepare() reads the cache. What is
+  # left is 8 replicates x 5 cells of subsample+eigh, measured at 0.8 s + 1.1 s for the
+  # largest (N=1600) cell: under a minute per task.
+  time: "00:30:00"
+  mem: 4G            # measured peak 2.0 G on the N=1600 cell
   cpus_per_task: 1

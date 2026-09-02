@@ -9,16 +9,16 @@ seed: 0
 
 fixed:
   L: 20000
-  L_polymorphic: false
+  L_polymorphic: true   # exact width; 112k polymorphic available at N=400, well over 20000
 
 sampling:
-  fixed: {N: 200}
+  fixed: {N: 400}
   vary:
     param: phi
-    values: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+    values: [0.1,0.2,0.3,0.4,0.5]
 
 cluster:
-  job_name: sw_split_phi
-  time: "00:40:00"
-  mem: 3G
+  job_name: sweep_split_phi
+  time: "00:40:00"   # ~3.5 min/task: 5 cells at a flat N=400
+  mem: 4G
   cpus_per_task: 1

@@ -10,7 +10,10 @@ seed: 0
 
 fixed:
   L: 10000
-  L_polymorphic: false
+  # Exact width. Feasible: the smallest cell (n_per_deme_B = 2, N = 324) leaves 10521
+  # polymorphic columns against the 10000 requested -- a 5% margin, the second tightest
+  # in the set after config 06.
+  L_polymorphic: true
 
 # cos^2 is NOT monotone in 1/M on this demography: it peaks near 1/M ~ 0.3 and then decays,
 # because at very weak migration the demes drift into independent clusters and the single
@@ -20,27 +23,18 @@ fixed:
 non_monotone: true
 
 sampling:
-  # n-per-deme-B on a linear grid. The old [2,4,8,16,32,64] lost its top level: at
-  # phi = 0.5, n_A = n_per_deme_B * K^2, so n=64 needs 5184 samples from A but only 5000
-  # were simulated, and the model skipped it. Every value here stays under that cap
-  # (n=60 needs 4860), so all six levels are measured.
   fixed: {phi: 0.5}
   vary:
     param: n_per_deme_B
-    values: [10, 20, 30, 40, 50, 60]
+    values: [2, 4, 8, 16, 32]
 
 cluster:
-  job_name: sw_splitss_N
-  # Measured on a real task (sim99, all six cells): 51 min wall, 4.44G peak RSS.
-  # Both numbers are worth pinning rather than deriving -- an arrays-only estimate
-  # (subsample + GRM = 1.15G at n=60) understated the true peak by ~4x, because eigh
-  # workspace, LAPACK scratch and float64 copies dominate at these N. The n=60 cell
-  # alone is ~49% of the N^3 work, so the tail is where both time and memory land.
-  #
-  # Raised from 02:00:00 after 87 of 100 tasks hit the wall at exactly 02:00:29: the cell
-  # now does TWO eigendecompositions per replicate (the standardized GRM alongside the
-  # ordinary one) plus the eigenvalue bookkeeping, roughly doubling the 51 min baseline
-  # and leaving no margin at 2h on a loaded node.
-  time: "05:00:00"   # ~1h45 expected after the standardized GRM doubled the work
-  mem: 8G            # 4.44G measured, 1.8x margin
+  job_name: sweep_split_ss_N
+  # The 05:00:00 / 8G block was sized for the old [10,20,30,40,50,60] grid, whose largest
+  # cell was N=9720. The new [2,4,8,16,32] grid tops out at N=5184, cutting the summed
+  # N^3 work by 12x. Measured at that largest cell: subsample 0.8 s, eigh 26.9 s, peak
+  # RSS 2.0 G. Two eigendecompositions per replicate (the standardized GRM alongside the
+  # ordinary one) plus within_B_F_hat's phase-type solve per cell keep the margin wide.
+  time: "01:00:00"
+  mem: 5G
   cpus_per_task: 1

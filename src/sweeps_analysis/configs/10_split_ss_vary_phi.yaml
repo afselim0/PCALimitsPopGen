@@ -14,7 +14,7 @@ seed: 0
 
 fixed:
   L: 10000
-  L_polymorphic: false
+  L_polymorphic: true   # exact width; 12274 polymorphic at the smallest cell (phi=0.5, N=648)
 
 # cos^2 is NOT monotone in 1/M on this demography: it peaks near 1/M ~ 0.3 and then decays,
 # because at very weak migration the demes drift into independent clusters and the single
@@ -27,10 +27,12 @@ sampling:
   fixed: {n_per_deme_B: 4}
   vary:
     param: phi
-    values: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    values: [0.1, 0.2, 0.3, 0.4, 0.5]
 
 cluster:
-  job_name: sw_splitss_phi
-  time: "01:30:00"   # n_per_deme_B = 4 caps N at ~3240 (phi = 0.1)
+  job_name: sweep_split_ss_phi
+  # Dropping phi = 0.6/0.7/0.8 removed the three SMALLEST cells (N = 540/463/405), so the
+  # summed N^3 work is essentially unchanged: phi = 0.1 still sets N = 3240 and dominates.
+  time: "01:30:00"
   mem: 5G
   cpus_per_task: 1

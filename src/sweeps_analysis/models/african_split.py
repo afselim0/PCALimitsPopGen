@@ -36,6 +36,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
 from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from precompute_coal_times import load as load_coal_times
+
 SIM_PARAM = "Fst"
 X_KEY = "Fst"
 
@@ -109,8 +112,23 @@ def _check_feasible(n, label):
 
 
 def prepare(cfg, sim_row):
-    """The msprime coalescent-time integration for this simulation's t_split. ~15-20 min."""
-    return {"T": pop_coal_times(float(sim_row["t_split"]))}
+    """
+    This simulation's coalescent-time matrix, from the stage-0 cache.
+
+    pop_coal_times is a ~15-20 min integration depending only on t_split, so it is
+    precomputed once per t_split by precompute_coal_times.py rather than repeated in every
+    sweep task (configs 03 and 04 together cover the same 100 t_splits, so integrating
+    here cost 200 runs for 100 distinct values). Falls back to integrating in-process if
+    the shard is absent, so a sweep still runs without the precompute stage.
+    """
+    t_split = float(sim_row["t_split"])
+    T = load_coal_times(t_split)
+    if T is None:
+        print(f"  no cached coalescent times for t_split={t_split:.4f}; integrating "
+              f"in-process (~15-20 min). Run precompute_coal_times.py to avoid this.",
+              flush=True)
+        return {"T": pop_coal_times(t_split)}
+    return {"T": T}
 
 
 def prepare_cached(cfg, cell_row):

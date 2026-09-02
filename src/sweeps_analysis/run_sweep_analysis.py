@@ -74,6 +74,9 @@ def main():
                    help="with --submit, only write the .sbatch files, don't call sbatch")
     p.add_argument("--force", action="store_true",
                    help="recompute cells whose partial file already exists")
+    p.add_argument("--after", default=None, metavar="JOBID",
+                   help="with --submit, hold the array until this job id succeeds "
+                        "(the OOA3 configs use it to wait on the coalescent-time array)")
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -93,7 +96,7 @@ def main():
         for path in paths:
             print(f"wrote {path}")
         if not args.no_submit:
-            submit_all(paths)
+            submit_all(paths, array_dependency=args.after)
         return
 
     os.makedirs(outdir, exist_ok=True)

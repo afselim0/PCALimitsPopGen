@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH --job-name={job_name}_agg
+#SBATCH --account=pi-jnovembre
+#SBATCH --partition=jnovembre
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=2G
+#SBATCH --time=00:10:00
+#SBATCH --output=slurm_runs/coal_times/{job_name}_agg_%j.out
+#SBATCH --error=slurm_runs/coal_times/{job_name}_agg_%j.err
+
+mkdir -p slurm_runs/coal_times
+
+source /software/bin/miniconda3/etc/profile.d/conda.sh
+conda activate /project/jnovembre/afselim/pca_rmt
+python src/sweeps_analysis/precompute_coal_times.py \
+    --simdir {simdir} --aggregate

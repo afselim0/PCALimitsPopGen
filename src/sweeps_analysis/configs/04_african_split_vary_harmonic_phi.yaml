@@ -18,17 +18,19 @@ n_replicates: 8
 seed: 0
 
 fixed:
-  L: 50000
-  L_polymorphic: false
+  L: 20000
+  L_polymorphic: true   # exact width; >78k polymorphic at every (phi_1, phi_2) cell
 
 sampling:
   fixed: {N: 1000}
   vary:
     param: phi_sister_pair
-    values: [0.05, 0.10, 0.15, 0.20]
+    values: [0.05, 0.10, 0.20]
 
 cluster:
-  job_name: sw_ooa3_phi
-  time: "02:00:00"
-  mem: 6G
+  job_name: sweep_ooa3_phi
+  # As config 03: the coalescent integration moved to the stage-0 array, leaving 6 cells
+  # (3 values -> 6 unordered pairs) at a flat N=1000.
+  time: "00:30:00"
+  mem: 4G
   cpus_per_task: 1

@@ -287,7 +287,12 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
         nu_reps.append(replicate_structure_eigenvalues(K, M, n_per, demes, dimension,
                                                        k, Ne=Ne))
 
-        sub = subsample(Z, n, L, rng)
+        # L_polymorphic must be honoured here as it is on the pc_recovery path: without
+        # it L is a pre-filter draw count and the realised width drifts with N, so the
+        # replicates being medianed would not share a gamma (measured 5268 to 10000
+        # across this config's cells at a nominal L = 10000).
+        sub = subsample(Z, n, L, rng,
+                        L_polymorphic=cfg["fixed"].get("L_polymorphic", False))
         V_theory = true_axis_restricted(K, dimension, n_per, demes, K_demes)
         by_magnitude = np.any(nu < 0)
         # Only the sampled demes carry samples, so the number of subpopulations here is

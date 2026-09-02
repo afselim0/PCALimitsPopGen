@@ -13,16 +13,16 @@ seed: 0
 fixed:
   dimension: 2
   L: 10000
-  L_polymorphic: true
+  L_polymorphic: true   # exact width; 12203 polymorphic at the smallest cell (n=2, N=162)
 
 sampling:
   fixed: {deme_fraction: 1.0}
   vary:
     param: n_per_deme
-    values: [2, 4, 8, 16, 32, 64]
+    values: [2, 4, 8, 16, 32]
 
 cluster:
-  job_name: sw_ss2d_n
-  time: "03:00:00"   # K^2 = 81 demes, so n=64 gives N=5184 -- the largest cell anywhere
-  mem: 6G            # in these sweeps, and eigh cost goes as N^3
+  job_name: sweep_ss2d_n
+  time: "00:45:00"   # top level dropped 64 -> 32: N <= 2592, an 8x cut in N^3 work.
+  mem: 4G            # measured eigh 3.3 s and peak RSS 2.0 G at that cell
   cpus_per_task: 1

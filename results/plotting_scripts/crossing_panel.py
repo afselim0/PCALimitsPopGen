@@ -73,6 +73,15 @@ CROSS_MARKER_KW = dict(marker="o", markersize=7, markeredgecolor="white",
 # one (see the module docstring).
 # The fitted transition, drawn ON the curve, where it leaves its plateau. A square keeps it
 # distinct from the round marker at the target crossing.
+# The target crossing's CI, styled to match the transition's so the two read as the same
+# kind of statement about the x axis.
+CROSS_CI_KW = dict(linewidth=1.6, solid_capstyle="butt", alpha=0.9, zorder=5)
+
+# The transition's bootstrap CI, drawn as a horizontal bar THROUGH the marker at the
+# curve's height. Thin and under the marker so a tight CI reads as a marker with whiskers
+# rather than as a second mark.
+TAU_CI_KW = dict(linewidth=1.6, solid_capstyle="butt", alpha=0.9, zorder=5)
+
 TAU_MARKER_KW = dict(marker="s", markersize=5.5, linestyle="none",
                      markeredgecolor="white", markeredgewidth=0.8, zorder=6)
 
@@ -541,8 +550,10 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
 
         # The fitted transition -- where the drawn curve leaves its plateau. Marked on the
         # curve so it sits exactly where the line lifts off, which is the whole point of
-        # the threshold fit; the hollow marker above is the independent eigenvalue estimate
-        # of the same quantity, and the two being close is the result worth seeing.
+        # the threshold fit. The horizontal bar is its bootstrap CI: tau is a location on
+        # the x axis, so its uncertainty is horizontal, and the vertical band beside it
+        # answers a different question (how high the curve sits). Both come from the same
+        # resamples.
         # Suppressed when the curve was already rising at the smallest swept x: tau is then
         # the left edge, a bound rather than a measurement, and a marker there would read
         # as a detected transition. Older summaries carry the superseded slope-based
@@ -550,8 +561,13 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
         tau = _val(row, _col(row, "tau", standardized))
         below_range = bool(_val(row, _col(row, "tau_below_range", standardized)) == 1)
         if np.isfinite(tau) and not below_range and len(c):
-            y_tau = float(np.interp(np.log(tau), np.log(c["x"].to_numpy(float)),
-                                    c[_col(c, "y_fit", standardized)].to_numpy(float)))
+            cx = c["x"].to_numpy(float)
+            cy = c[_col(c, "y_fit", standardized)].to_numpy(float)
+            y_tau = float(np.interp(np.log(tau), np.log(cx), cy))
+            lo = _val(row, _col(row, "tau_lo", standardized))
+            hi = _val(row, _col(row, "tau_hi", standardized))
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                ax.plot([lo, hi], [y_tau, y_tau], color=color, **TAU_CI_KW)
             ax.plot([tau], [y_tau], color=color, **TAU_MARKER_KW)
         pickup_x = tau if np.isfinite(tau) else _val(
             row, _col(row, "pickup_x", standardized))
@@ -562,6 +578,15 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
             # grazes the target as the sweep ends gets a hollow marker -- its crossing is a
             # lower bound set by where the simulation stopped, not a measured detection
             # point, and it would otherwise read as if it were one.
+            #
+            # Horizontal bar first, so the marker sits on top of it: like the transition,
+            # the crossing is a location on the x axis and its uncertainty is horizontal.
+            # It comes from where the band edges reach the target, so it is the same
+            # bootstrap that produced the band.
+            c_lo = _val(row, _col(row, "crossing_lo", standardized))
+            c_hi = _val(row, _col(row, "crossing_hi", standardized))
+            if np.isfinite(c_lo) and np.isfinite(c_hi) and c_hi > c_lo:
+                ax.plot([c_lo, c_hi], [target, target], color=color, **CROSS_CI_KW)
             if at_edge:
                 ax.plot([crossing], [target],
                         **{**CROSS_MARKER_KW, "markerfacecolor": "none",
@@ -813,15 +838,17 @@ def encoding_legend(ax, target=DEFAULT_TARGET, loc="upper left", force_loc=False
     """
     handles = [
         Line2D([], [], color="0.35", linewidth=1.7, label="threshold fit"),
-        Line2D([], [], color="0.35", label="measured transition (fit)", **TAU_MARKER_KW),
+        Line2D([], [], color="0.35", marker="s", markersize=5.5, linewidth=1.6,
+               markeredgecolor="white", markeredgewidth=0.8,
+               label="measured transition (fit), 95% CI"),
     ]
     if show_band:
         handles.append(
             Patch(facecolor="0.35", alpha=0.25, edgecolor="none",
                   label="95% bootstrap band"))
     handles.append(
-        Line2D([], [], color="0.35",
-               label=rf"measured $\langle\hat u,u\rangle^2={target:g}$",
+        Line2D([], [], color="0.35", linewidth=1.6,
+               label=rf"measured $\langle\hat u,u\rangle^2={target:g}$, 95% CI",
                **CROSS_MARKER_KW))
     if show_theory_crossing:
         handles += [

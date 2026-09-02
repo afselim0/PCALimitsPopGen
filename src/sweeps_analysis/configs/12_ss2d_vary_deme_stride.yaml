@@ -18,7 +18,7 @@ fixed:
   dimension: 2
   K: 9
   L: 10000
-  L_polymorphic: false
+  L_polymorphic: true    # exact width; >13600 polymorphic at every stride level
 
 sampling:
   fixed: {N_total: 324}

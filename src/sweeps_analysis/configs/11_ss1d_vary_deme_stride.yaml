@@ -19,7 +19,7 @@ fixed:
   dimension: 1
   K: 25                  # designs() needs the lattice size before any simulation row is read
   L: 10000
-  L_polymorphic: false   # matches configs 06/08: L is a pre-filter draw count
+  L_polymorphic: true    # exact width; >12600 polymorphic at every stride level
 
 sampling:
   fixed: {N_total: 100}

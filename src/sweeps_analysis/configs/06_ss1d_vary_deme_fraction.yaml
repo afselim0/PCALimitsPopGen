@@ -7,7 +7,7 @@ model: stepping_stone
 name: ss1d_vary_deme_fraction
 simdir: results/simulations/stepping_stone_1d/K25
 
-n_replicates: 8
+n_replicates: 16
 # Each replicate draws its own deme subset, so nu is a property of the replicate and
 # not of the cell: the summary is one joint table rather than an empirical/theory pair.
 per_replicate_theory: true
@@ -17,8 +17,10 @@ seed: 0
 fixed:
   dimension: 1
   L: 10000
-  L_polymorphic: false   # the random-deme path draws L as a pre-filter count, matching
-                         # src/analysis/SteppingStoneRandomSampling
+  # Exact width. This is the tightest cell in the whole set: at deme_fraction = 0.2
+  # (N = 40) only 10407 columns are polymorphic against the 10000 requested, a 4% margin.
+  # Lower L here rather than raising it if the deme grid is ever extended downward.
+  L_polymorphic: true
 
 sampling:
   fixed: {n_per_deme: 8}
@@ -27,7 +29,7 @@ sampling:
     values: [0.2, 0.4, 0.6, 0.8, 1.0]
 
 cluster:
-  job_name: sw_ss1d_phi
+  job_name: sweep_ss1d_phi
   time: "00:45:00"   # N <= 200 throughout; cheap
   mem: 3G
   cpus_per_task: 1

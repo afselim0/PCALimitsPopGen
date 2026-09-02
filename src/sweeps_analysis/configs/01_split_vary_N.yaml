@@ -10,16 +10,23 @@ seed: 0
 
 fixed:
   L: 20000
-  L_polymorphic: false   # as the existing driver: L is a pre-filter draw count here
+  # Exact width: L is drawn from the polymorphic columns, so every replicate and every
+  # cell returns exactly this many SNPs and gamma = N/L_eff moves only with N. Verified
+  # feasible -- the least-differentiated simulation leaves 88k polymorphic at the
+  # smallest cell (N=100), against the 20000 requested.
+  L_polymorphic: true
 
 sampling:
   fixed: {phi: 0.5}
   vary:
     param: N
-    values: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    values: [100, 200, 400, 800, 1600]
 
 cluster:
-  job_name: sw_split_N
+  job_name: sweep_split_N
+  # Measured: subsample 20.1 s + eigh 1.6 s at the N=1600 cell, 8 replicates x 5 cells
+  # ~ 5 min/task. The subsample dominates here because the split .npy is 200k columns
+  # wide on a network filesystem, not because of the exact-L path (peak RSS 2.0 G).
   time: "01:00:00"
-  mem: 3G
+  mem: 4G
   cpus_per_task: 1

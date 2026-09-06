@@ -46,7 +46,8 @@ from pc_recovery import (analytical_cosine, effective_L, locus_moments, locus_we
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
-from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
+from threshold_and_overlap import (approx_nu_c, approx_overlap, crude_nu_alpha,
+                                   exact_nu_c, exact_overlap)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "simulations"))  # src/simulations/
@@ -108,6 +109,25 @@ def prepare(cfg, sim_row):
             "K_demes": num_demes(K, dimension)}
 
 
+def fraction_n_per_deme(K, phi, dimension, N_total):
+    """n-per-deme placing N_total samples evenly over the demes a fraction phi retains.
+
+    The deme COUNT is deterministic in phi -- sample_demes takes round(phi * K_demes) of
+    them, only WHICH demes is random -- so n-per-deme can be fixed at design time even
+    though the subset is redrawn per replicate.
+
+    Holding N_total fixed is what makes the sweep a test of deme fraction alone. With
+    n-per-deme held fixed instead, N grew in proportion to phi (1D: 40 -> 200 across the
+    grid), so the curve mixed the effect of sampling fewer demes with the effect of
+    sampling fewer individuals, and the two cannot be separated after the fact.
+
+    Floor, not round: the cell must never ask for more samples than were simulated per
+    deme. The realised N is recorded per cell as `N`.
+    """
+    n_demes = max(int(round(float(phi) * num_demes(K, dimension))), 1)
+    return max(int(N_total // n_demes), 1)
+
+
 def stride_n_per_deme(K, p, dimension, N_total):
     """n-per-deme placing N_total samples evenly over the demes a stride p retains.
 
@@ -134,6 +154,16 @@ def designs(cfg):
         frac = float(fixed["deme_fraction"])
         return [(int(v), {"n_per_deme": int(v), "deme_fraction": frac}) for v in values]
     if param == "deme_fraction":
+        # N_total fixed (the sweep tests deme fraction alone, so n-per-deme is derived) or
+        # n_per_deme fixed (the older behaviour, where N grew with phi).
+        if "N_total" in fixed:
+            K = int(cfg["fixed"]["K"])
+            dimension = int(cfg["fixed"]["dimension"])
+            N_total = int(fixed["N_total"])
+            return [(float(v), {"deme_fraction": float(v), "N_total": N_total,
+                                "n_per_deme": fraction_n_per_deme(K, float(v),
+                                                                  dimension, N_total)})
+                    for v in values]
         n_per = int(fixed["n_per_deme"])
         return [(float(v), {"n_per_deme": n_per, "deme_fraction": float(v)})
                 for v in values]
@@ -446,6 +476,58 @@ def nu_of_x(ctx, design, sim_row, cfg, measured):
             nu_full = subsampled_structure_eigenvalues(K, M, n_per, frac, dimension)
         return float(np.mean(nu_full[:k]))   # the degenerate pair shares one value in 2D
     return nu_at
+
+
+def x_alpha(ctx, design, sim_row, cfg, measured):
+    """
+    alpha -> the 1/M at which the crude (L_eff) route predicts cos^2 = alpha, in closed form.
+
+    Under EVEN sampling nu_1 = N / (M K_demes mu_1) with mu_1 = 4 sin^2(pi/2K) ~ pi^2/K^2,
+    so K_demes mu_1 -> pi^2/K in 1D (K_demes = K) and -> pi^2 in 2D (K_demes = K^2), and
+    inverting at nu = crude_nu_alpha = sqrt(N / (L_eff (1 - alpha))) gives
+
+        1D   M_alpha = K sqrt(N L_eff (1 - alpha)) / pi^2
+        2D   M_alpha =   sqrt(N L_eff (1 - alpha)) / pi^2
+
+    returned as 1/M, which is the swept parameter. The small-angle step mu_1 -> pi^2/K^2 is
+    worth 0.1% at K = 25 (1D) and 1.0% at K = 9 (2D).
+
+    That closed form presumes every deme is sampled. Under a random fraction or a stride
+    the deme set changes K_demes mu_1 by an amount no closed form covers, so nu_of_x --
+    which handles those cases numerically -- is inverted instead. nu is exactly proportional
+    to 1/M in every case, so that inversion is one evaluation and a rescale, not a search.
+    """
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    if tc is None:
+        return None
+    N, L_eff = tc["N"], tc["L_eff"]
+    K, dimension = ctx["K"], ctx["dimension"]
+
+    n_demes = int(measured.get("n_demes_sampled", ctx["K_demes"]))
+    stride = measured.get("deme_stride")
+    stride = int(stride) if stride is not None and np.isfinite(stride) else None
+    even = (stride is None or stride == 1) and n_demes >= ctx["K_demes"]
+
+    if even:
+        scale = (K if dimension == 1 else 1.0) / np.pi ** 2
+
+        def inv_M_of_alpha(alpha):
+            M = scale * np.sqrt(N * L_eff * (1.0 - float(alpha)))
+            return 1.0 / M if M > 0 else np.nan
+        return inv_M_of_alpha
+
+    nu_fn = nu_of_x(ctx, design, sim_row, cfg, measured)
+    if nu_fn is None:
+        return None
+    # nu is exactly proportional to 1/M, so one anchor fixes the whole curve.
+    x_ref = 1.0
+    nu_ref = float(nu_fn(x_ref))
+    if not np.isfinite(nu_ref) or nu_ref <= 0:
+        return None
+
+    def inv_M_of_alpha(alpha):
+        return x_ref * crude_nu_alpha(float(alpha), N, L_eff) / nu_ref
+    return inv_M_of_alpha
 
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):

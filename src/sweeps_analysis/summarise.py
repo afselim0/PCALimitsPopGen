@@ -24,8 +24,8 @@ a parameter. Both the transition and the target crossing are read off the SAME f
 so the drawn line and the reported numbers cannot disagree.
 
 The recent-split spatial sweeps (`non_monotone: true`) turn over rather than saturating, so
-they are not flat-then-increasing and keep the concave scam smooth, summarised by their
-peak. See src/analysis/scam_fit.py.
+they are not flat-then-increasing and get an unconstrained penalized smooth instead,
+summarised by their maximum. See src/analysis/scam_fit.py.
 
 Bands and CIs are a replicate bootstrap that refits the whole model, the break included --
 conditioning on a fitted break would treat it as known and understate every interval.
@@ -125,9 +125,20 @@ def _theory_rows_for(cfg, cells, level, level_param, x_key, sweep, h, x_values, 
     if tc is None or nu_fn is None:
         return []
 
+    # The crude (L_eff) route's positions come from the model's closed-form inversion when
+    # it has one, so the tick row marks the manuscript's Fst_alpha / M_alpha expressions
+    # rather than a numerical inversion of the same overlap the approximate line already
+    # draws. A model without x_alpha keeps the numerical route.
+    xa = None
+    if hasattr(model, "x_alpha"):
+        try:
+            xa = model.x_alpha(ctx, dict(cell_row), cell_row, cfg, measured)
+        except Exception as exc:
+            print(f"    x_alpha unavailable ({type(exc).__name__}: {exc})")
+
     return theory_rows(sweep, level, level_param, x_key, nu_fn, tc, x_values,
                        target=target, nu_form=getattr(model, "NU_FORM", ""),
-                       extra={level_param: level, "sweep_param": level})
+                       extra={level_param: level, "sweep_param": level}, x_alpha=xa)
 
 
 def _nu_of_x_for(cfg, cells, level):
@@ -149,6 +160,45 @@ def _nu_of_x_for(cfg, cells, level):
         return model.nu_of_x(ctx, dict(cell_row), cell_row, cfg, dict(cell_row))
     except Exception:
         return None
+
+
+def _per_replicate_x_c(joint, sweep, level):
+    """
+    Mean detection threshold over the random deme configurations, as {route: x_c}.
+
+    The random-fraction sweeps redraw the deme subset per replicate, so nu -- and hence the
+    swept value at which nu(x) reaches nu_c -- is a property of the draw, not of the cell.
+    The threshold for the curve is therefore DEFINED as the mean over those draws, matching
+    how nu itself is defined for these sweeps (a median over 16 subsets; see CLAUDE.md).
+
+    nu is exactly proportional to x = 1/M on the stepping stones, so each replicate's
+    threshold is x * nu_c / nu in closed form -- no numerical inversion, and verified here
+    by checking that nu/x is constant along the curve.
+    """
+    from theory_table import ROUTES
+    d = joint[(joint["sweep"] == sweep) & (joint["level"] == level)]
+    out = {}
+    if not len(d) or "nu" not in d.columns:
+        return out
+    x = d["x"].to_numpy(float)
+    nu = d["nu"].to_numpy(float)
+    ok = np.isfinite(x) & np.isfinite(nu) & (nu > 0) & (x > 0)
+    if not ok.any():
+        return out
+    slope = nu[ok] / x[ok]
+    # nu ∝ x is what makes the closed form valid; bail rather than mislead if it is not.
+    if slope.std() / max(abs(slope.mean()), 1e-30) > 1e-6:
+        return out
+    for route in ROUTES:
+        col = f"nu_c_{route}"
+        if col not in d.columns:
+            continue
+        nu_c = d[col].to_numpy(float)[ok]
+        vals = x[ok] * nu_c / nu[ok]
+        vals = vals[np.isfinite(vals)]
+        if vals.size:
+            out[f"x_c_{route}"] = float(vals.mean())
+    return out
 
 
 def _joint_frame(empirical, cells, cfg, h_by_level):
@@ -226,7 +276,7 @@ def _fit_summary(fit, target, non_monotone, suffix=""):
         out[f"crossing_y{suffix}"] = target
         out[f"crossing_at_edge{suffix}"] = at_edge
         # The fitted break: a parameter of the model, not a level someone chose. NaN for
-        # the concave sweeps, which have no plateau to leave. tau_below_range marks a curve
+        # the turnover sweeps, which have no plateau to leave. tau_below_range marks a curve
         # already rising at the smallest swept x -- there tau is a bound, not a measurement.
         out.update({f"{k}{suffix}": v for k, v in transition_with_ci(fit).items()})
     out[f"shape{suffix}"] = fit["shape"] if fit is not None else None
@@ -265,17 +315,16 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
         x = d["x"].to_numpy(float)
         y = d[VALUE_KEY].to_numpy(float)
 
-        # The shape constraint is the only thing imposed on the curve. A sweep whose
-        # response turns over gets "cv" (concave) and is summarised by its peak; every
-        # other sweep is monotone increasing in the swept parameter and gets "mpi" and a
-        # crossing. The recent-split spatial axis is the turnover case: cos^2 rises to
-        # ~0.93 near 1/M ~ 0.3 and then decays, because at very weak migration the demes
-        # drift into independent clusters and a single (1,0)/(0,1) pair stops describing
-        # the structure.
-        # A sweep whose response turns over keeps the concave scam smooth and is
-        # summarised by its peak: it has no plateau, so the threshold model does not
-        # describe it. Every other sweep is flat-then-increasing in the swept parameter.
-        shape = "cv" if non_monotone else "mpi"
+        # A sweep whose response turns over is fitted with an UNCONSTRAINED penalized
+        # smooth ("tp", mgcv) and summarised by its maximum: it has no plateau, so the
+        # threshold model does not describe it, and the concave constraint used previously
+        # forced the whole curve to bend one way, biasing the fitted maximum toward the
+        # middle of the swept range. The recent-split spatial axis is the turnover case:
+        # cos^2 rises to ~0.93 near 1/M ~ 0.3 and then decays, because at very weak
+        # migration the demes drift into independent clusters and a single (1,0)/(0,1)
+        # pair stops describing the structure. Every other sweep is flat-then-increasing
+        # in the swept parameter and gets the threshold model.
+        shape = "tp" if non_monotone else "mpi"
         if non_monotone:
             fit = scam_fit(x, y, shape=shape, n_grid=n_grid)
         else:
@@ -402,12 +451,20 @@ def summarise_sweep(sweep_dir, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
     empirical = (pd.concat(empirical_out, ignore_index=True) if empirical_out
                  else pd.DataFrame())
     theory = pd.concat(theory_out, ignore_index=True) if theory_out else pd.DataFrame()
+    cross = pd.DataFrame(cross_rows)
     if per_replicate_theory:
         # Each replicate sampled a different set of demes, so its theory is its own: the
         # measurement and the nu it should be compared against travel on the same row, and
         # there is no separate theory table to join back to.
         empirical = _joint_frame(empirical, cells, cfg, h_by_level)
-    return pd.DataFrame(cross_rows), curves, points, empirical, theory
+        # These sweeps write no theory.csv, so the theoretical detection thresholds would
+        # otherwise have nowhere to live and the figures could draw no theory line. Averaged
+        # over the deme draws (see _per_replicate_x_c) and written onto the curve's own row,
+        # which is where crossing_panel._theory_positions looks first.
+        for i, r in cross.iterrows():
+            for k, v in _per_replicate_x_c(empirical, r["sweep"], r["level"]).items():
+                cross.loc[i, k] = v
+    return cross, curves, points, empirical, theory
 
 
 def run(sweep_dirs, out, target=DEFAULT_TARGET, n_boot=DEFAULT_N_BOOT,
@@ -456,7 +513,7 @@ def main():
     p.add_argument("--n-jobs", type=int, default=None,
                    help="processes for the per-curve bootstrap (default: serial)")
     args = p.parse_args()
-    # Only the concave (recent-split) sweeps still need scam; the monotone ones are fitted
+    # Only the turnover (recent-split) sweeps still need R; the monotone ones are fitted
     # by threshold_fit, which is numpy/scipy only. Check R just for the sweeps that use it,
     # so a missing R does not block the rest.
     needs_scam = []
@@ -467,7 +524,7 @@ def main():
                 if yaml.safe_load(f).get("non_monotone", False):
                     needs_scam.append(d)
     if needs_scam and not scam_available():
-        raise SystemExit(f"scam is unavailable but {', '.join(needs_scam)} are concave "
+        raise SystemExit(f"R is unavailable but {', '.join(needs_scam)} are turnover "
                          "sweeps that need it (needs r-base, r-scam and rpy2 in the "
                          "pca_rmt env, and R on PATH -- activate the env first)")
     run(args.sweep_dirs, args.out, target=args.target, n_boot=args.n_boot,

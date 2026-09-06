@@ -68,8 +68,11 @@ def run_one(index, simdir, cache_dir=CACHE_DIR, force=False):
     print(f"  integrating t_split={t:.4f} ...", flush=True)
     T = pop_coal_times(t)
     # Write via a temp file so a killed task cannot leave a half-written shard that the
-    # existence check would then treat as complete.
-    tmp = path + f".tmp{os.getpid()}"
+    # existence check would then treat as complete. The suffix stays ".npy" because
+    # np.save APPENDS ".npy" to any path lacking it -- a bare ".tmp<pid>" suffix makes it
+    # write "<name>.npy.tmp<pid>.npy" while os.replace looks for "<name>.npy.tmp<pid>",
+    # so every task fails at the rename after doing the full 15 min integration.
+    tmp = f"{path}.tmp{os.getpid()}.npy"
     np.save(tmp, T)
     os.replace(tmp, path)
     print(f"  wrote {path}")

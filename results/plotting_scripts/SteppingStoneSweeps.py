@@ -48,7 +48,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import cm, colors, lines
 
-from crossing_panel import save_figure
+from crossing_panel import figsize, save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -171,7 +171,7 @@ def panel(ax, df, key, cmap, legend_title, label_fn, title):
 def make_figure(df, dimension, outpath):
     """The two panels for one dimension."""
     setup_plotting_style()
-    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.9))
+    fig, axes = plt.subplots(1, 2, figsize=figsize(9.6, 3.9))
 
     geometry = "chain" if dimension == 1 else "grid"
 

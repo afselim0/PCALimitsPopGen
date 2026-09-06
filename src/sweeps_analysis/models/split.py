@@ -125,6 +125,28 @@ def nu_of_x(ctx, design, sim_row, cfg, measured):
     return lambda fst: 2.0 * N * phi_a * (1.0 - phi_a) * float(fst) / (1.0 - float(fst))
 
 
+def x_alpha(ctx, design, sim_row, cfg, measured):
+    """
+    alpha -> the Fst at which the crude (L_eff) route predicts cos^2 = alpha, in closed form.
+
+    Invert nu = N phi_tilde Fst (the small-Fst limit of nu_of_x, with phi_tilde the
+    harmonic mean 2 phi_1 phi_2 / (phi_1 + phi_2) = 2 phi_1 phi_2 since phi_1 + phi_2 = 1)
+    at nu = crude_nu_alpha = sqrt(N / (L_eff (1 - alpha))):
+
+        Fst_alpha = 1 / (phi_tilde sqrt(N L_eff (1 - alpha)))
+
+    alpha = 0 gives the detection threshold Fst_0. Dropping the 1/(1 - Fst) factor costs
+    ~2% at the top of the swept range; see nu_of_x.
+    """
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    if tc is None:
+        return None
+    N, L_eff = tc["N"], tc["L_eff"]
+    phi_a = float(tc["phi"][0])
+    phi_t = 2.0 * phi_a * (1.0 - phi_a)
+    return lambda alpha: 1.0 / (phi_t * np.sqrt(N * L_eff * (1.0 - float(alpha))))
+
+
 def theory_overlap(ctx, design, sim_row, cfg, measured):
     """
     Fst -> predicted cos^2, via the two-moment route.

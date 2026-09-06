@@ -1,4 +1,4 @@
-# 1D stepping stone, n-per-deme fixed, varying the proportion of demes sampled.
+# 1D stepping stone, TOTAL N fixed, varying the proportion of demes sampled.
 #
 # phi is redrawn per replicate, so the theoretical axis changes per replicate:
 # models/stepping_stone.py sets per_replicate and supplies cell_replicates(). pc_recovery
@@ -16,14 +16,28 @@ seed: 0
 
 fixed:
   dimension: 1
+  K: 25                  # designs() needs the lattice size before any simulation row is read
+  # 10000, matching configs 05 and 11, so gamma = N/L_eff IS comparable cell-for-cell
+  # across the K=25 sweeps.
+  #
+  # This was 9000 while n_per_deme was fixed at 8: deme_fraction 0.2 then drew only N = 40
+  # samples, whose polymorphic width bottomed out at 9794 over the real 100 sims x 16
+  # replicates, so L = 10000 was unreachable and 20 of 100 tasks died. Holding N_total at
+  # 200 removes that cell -- every cell now draws ~200 samples -- and the worst observed
+  # width rises to 13985 (measured over 13 sims x 16 replicates, by cell: frac 0.2 ->
+  # 13985, 0.4 -> 14316, 0.6 -> 14437, 0.8 -> 14582, 1.0 -> 14594). 10000 leaves 29%
+  # headroom under the worst draw.
   L: 10000
-  # Exact width. This is the tightest cell in the whole set: at deme_fraction = 0.2
-  # (N = 40) only 10407 columns are polymorphic against the 10000 requested, a 4% margin.
-  # Lower L here rather than raising it if the deme grid is ever extended downward.
   L_polymorphic: true
 
 sampling:
-  fixed: {n_per_deme: 8}
+  # N_total fixed, NOT n_per_deme: n-per-deme is derived as N_total / (demes retained), so
+  # every cell draws the same 200 samples and the sweep isolates the effect of spreading
+  # them over fewer demes. With n_per_deme: 8 fixed instead, N ran 40 -> 200 across this
+  # grid and the curve conflated deme fraction with total sample size.
+  # Derived n-per-deme (K=25): frac 0.2 -> 5 demes -> 40; 0.4 -> 10 -> 20;
+  # 0.6 -> 15 -> 13; 0.8 -> 20 -> 10; 1.0 -> 25 -> 8.
+  fixed: {N_total: 200}
   vary:
     param: deme_fraction
     values: [0.2, 0.4, 0.6, 0.8, 1.0]

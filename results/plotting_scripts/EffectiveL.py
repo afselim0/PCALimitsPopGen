@@ -21,11 +21,13 @@ Reads results/analysis/EffectiveL, writes results/figures/EffectiveL.pdf
 import os
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.transforms import ScaledTranslation
 import numpy as np
 import pandas as pd
 from matplotlib import cm, colors
 
-from crossing_panel import save_figure
+from crossing_panel import PANEL_LETTER_SIZE, figsize, save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,18 +50,22 @@ def panel_A(ax, fig, summary):
     for N in N_values:
         d = summary[summary.N == N].sort_values("L_requested")
         ax.plot(d.L_requested, d.L_eff, '-', color=CMAP_N(norm(N)), linewidth=1.6,
-                zorder=2)
+                zorder=2, label=f'{N:g}')
 
     ax.set_xlabel(r'$L$  (independent SNPs)')
-    ax.set_ylabel(r'$L_{\mathrm{eff}} = \dfrac{(\sum_l \ h_l)^2}{\sum_l \ h_l^2}$')
-    ax.set_title(r'$L_{\mathrm{eff}}$ vs $L$')
-    ax.legend(loc='upper left', fontsize=9, frameon=False)
-
-    sm = cm.ScalarMappable(norm=norm, cmap=CMAP_N)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, pad=0.02)
-    cbar.set_label(r'$N$')
-    cbar.outline.set_visible(False)
+    # dfrac, not the inline /: at LABEL_PT the inline form set the two sums on one line
+    # and the ratio read as a product.
+    ax.set_ylabel(r'$L_{\text{eff}}$',
+                  labelpad=2)
+    ax.set_title(r'$L_{\mathrm{eff}}$ vs raw $L$')
+    # The identity line is keyed inside the panel; the ten N curves get their own discrete
+    # legend under the row (see make_figure). A continuous colourbar was the wrong encoding
+    # here -- N takes ten chosen values, not a continuum, and the bar asked the reader to
+    # interpolate a ramp to recover them.
+    ax.legend([Line2D([], [], color='0.55', linestyle='--', linewidth=1.2)],
+              [r'$L_{\mathrm{eff}} = L$'], loc='upper left', frameon=False)
+    handles = [Line2D([], [], color=CMAP_N(norm(N)), linewidth=1.6) for N in N_values]
+    return handles, [f'{N:g}' for N in N_values]
 
 
 def panel_B(ax, summary):
@@ -67,8 +73,11 @@ def panel_B(ax, summary):
     L_max = summary.L_requested.max()
     d = summary[summary.L_requested == L_max].sort_values("N")
 
-    ax.plot(d.N, d.L_eff, 'o-', color=CMAP_N(0.35), markersize=4.5, linewidth=1.6)
+    ax.plot(d.N, d.L_eff, 'o-', color=CMAP_N(0.35), markersize=3.5, linewidth=1.6)
     ax.set_xlabel(r'$N$ (total number of samples)')
+    # Panel B plots L_eff, like panel A. Without this the axis was left unlabelled and
+    # picked up the colorbar's "N", which named the wrong quantity.
+    ax.set_ylabel(r'$L_{\mathrm{eff}}$')
     ax.set_title(rf'$L_{{\mathrm{{eff}}}}$ vs $N$  ($L={L_max:g}$)')
     # Zero-anchored, so the plateau is read against the full scale rather than against a
     # zoomed axis that would exaggerate the remaining decline.
@@ -79,15 +88,33 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
     setup_plotting_style()
     summary = pd.read_csv(os.path.join(analysis_dir, "summary.csv"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2), sharey=True)
-    panel_A(axes[0], fig, summary)
+    fig, axes = plt.subplots(1, 2, figsize=figsize(6.5, 3.4))
+    handles, labels = panel_A(axes[0], fig, summary)
     panel_B(axes[1], summary)
 
-    for ax, letter in zip(axes, "AB"):
-        ax.text(-0.15, 1.06, letter, transform=ax.transAxes,
-                fontsize=13, fontweight='bold', va='top')
+    # Square axes boxes, set directly rather than by guessing a figure height: the
+    # colourbar and the shared y axis take horizontal space that the figure aspect alone
+    # cannot account for.
+    for ax in axes:
+        ax.set_box_aspect(1.0)
 
-    fig.tight_layout()
+    for ax, letter in zip(axes, "AB"):
+        # Offset in POINTS, not axes fraction: a fraction of a 2.6 in panel is much
+        # less page than a fraction of the old wide one, so the fractional offset put
+        # panel B's letter inside panel A.
+        ax.text(0.0, 1.0, letter, transform=ax.transAxes + ScaledTranslation(
+            -22 / 72, 12 / 72, fig.dpi_scale_trans),
+            fontsize=PANEL_LETTER_SIZE, fontweight='bold', va='top')
+
+    # Leave a band at the foot of the canvas for the N key, so tight_layout does not
+    # spread the axes over it and drop the legend on the x labels.
+    fig.tight_layout(rect=(0, 0.10, 1, 1))
+    # The ten N curves are keyed BELOW the panel row, in five columns. Ten entries beside
+    # a 2.6 in panel would be taller than the panel itself; under the row they sit in the
+    # clear band tight_layout leaves beneath the x labels.
+    fig.legend(handles, labels, title=r'$N$ (total number of samples)',
+               loc='upper center', bbox_to_anchor=(0.5, 0.115), ncol=5,
+               frameon=False, handlelength=1.4, columnspacing=1.4)
     out = save_figure(fig, figure_dir, "EffectiveL")
     print(f"wrote {out}")
     return fig

@@ -18,6 +18,20 @@ only nu varies with x.
 Each route carries its own nu_c through to its own overlap: the routes are three different
 approximations of the same quantity, and pairing one route's threshold with another's
 overlap gives a curve that is neither. See src/threshold_and_overlap.py.
+
+The crude (L_eff) route's two positions are CLOSED FORM, not numerically inverted: a model
+that defines x_alpha(alpha) supplies them as x_alpha(0) and x_alpha(target). Those are the
+expressions the manuscript quotes --
+
+    single split   Fst_alpha = 1 / (phi_tilde sqrt(N L_eff (1 - alpha)))
+    OOA3           Fst_alpha = 1 / ((1+eps_0) phi_tilde sqrt(N L_eff (1-alpha)))
+                               - eps_0 / (N phi_tilde (1+eps_0))
+    1D stepping    M_alpha   = K sqrt(N L_eff (1 - alpha)) / pi^2
+    2D stepping    M_alpha   =   sqrt(N L_eff (1 - alpha)) / pi^2
+
+-- all four being nu(x) = sqrt(N / (L_eff (1 - alpha))) inverted for x. The figures' L_eff
+tick row therefore marks exactly what those formulas say, which is what makes the row a
+check on them rather than a redundant copy of the approximate line.
 """
 import os
 import sys
@@ -139,17 +153,31 @@ def _safe_call(fn, x):
     return v if np.isfinite(v) else np.nan
 
 
-def x_cross_all(nu_fn, tc, x_lo, x_hi, target=DEFAULT_TARGET, nu_cs=None):
+def x_cross_all(nu_fn, tc, x_lo, x_hi, target=DEFAULT_TARGET, nu_cs=None, x_alpha=None):
     """
     Per route: x_c (where nu = nu_c) and x_cross (where predicted cos^2 = target).
 
     Returns a flat dict of x_c_<route> and x_cross_<route>. Each route is inverted with its
     own nu_c, never a shared one.
+
+    The exact and approximate routes are inverted numerically. The crude (L_eff) route is
+    not: when the model supplies an `x_alpha` closure, both of its positions come from that
+    model's CLOSED-FORM inversion of nu = sqrt(N/(L_eff(1-alpha))) -- x_c_crude = x_alpha(0)
+    and x_cross_crude = x_alpha(target). That is the whole point of the crude route: it is
+    the one an analyst can write down in Fst or M. It sits EARLIER than a numerical
+    inversion of crude_overlap would, because the closed form drops the (1 + gamma_eff/nu)
+    denominator; the gap is ~3% at gamma_eff = 1e-3 and ~9% at 1e-2 (see crude_nu_alpha).
+    Without an x_alpha the crude route falls back to the same numerical inversion as the
+    other two.
     """
     nu_cs = nu_c_all(tc) if nu_cs is None else nu_cs
     out = {}
     for route in ROUTES:
         nu_c = nu_cs.get(f"nu_c_{route}", np.nan)
+        if route == "crude" and x_alpha is not None:
+            out["x_c_crude"] = _safe_call(x_alpha, 0.0)
+            out["x_cross_crude"] = _safe_call(x_alpha, target)
+            continue
         out[f"x_c_{route}"] = x_at_nu(nu_fn, nu_c, x_lo, x_hi)
         fn = overlap_fn(tc, route, nu_c=nu_c)
         out[f"x_cross_{route}"] = (
@@ -159,7 +187,7 @@ def x_cross_all(nu_fn, tc, x_lo, x_hi, target=DEFAULT_TARGET, nu_cs=None):
 
 
 def theory_rows(sweep, level, level_param, x_key, nu_fn, tc, x_values,
-                target=DEFAULT_TARGET, nu_form="", extra=None):
+                target=DEFAULT_TARGET, nu_form="", extra=None, x_alpha=None):
     """
     One theory row per swept value for a single curve.
 
@@ -172,7 +200,8 @@ def theory_rows(sweep, level, level_param, x_key, nu_fn, tc, x_values,
     x_lo, x_hi = float(x_values[0]), float(x_values[-1])
 
     nu_cs = nu_c_all(tc)
-    crossings = x_cross_all(nu_fn, tc, x_lo, x_hi, target=target, nu_cs=nu_cs)
+    crossings = x_cross_all(nu_fn, tc, x_lo, x_hi, target=target, nu_cs=nu_cs,
+                            x_alpha=x_alpha)
     fns = {r: overlap_fn(tc, r, nu_c=nu_cs.get(f"nu_c_{r}", np.nan)) for r in ROUTES}
 
     has_h = tc.get("h") is not None and len(np.asarray(tc.get("h", [])))

@@ -13,10 +13,15 @@ Shape constraints used here (scam's `bs=` codes):
 
     "mpi"  monotone increasing -- every overlap-vs-Fst and overlap-vs-(1/M) sweep, where
            more structure (or weaker migration) can only help recovery.
-    "cv"   concave              -- the recent-split spatial sweeps, where cos^2 rises to a
+    "tp"   UNCONSTRAINED       -- the recent-split spatial sweeps, where cos^2 rises to a
            peak near 1/M ~ 0.3 and then decays: at very weak migration the demes drift into
            independent clusters and a single (1,0)/(0,1) pair stops describing the
-           structure. Concavity captures the turnover without forcing a location for it.
+           structure. This is not a shape-constrained fit at all: it is an ordinary
+           penalized thin-plate smooth through mgcv::gam, whose only restraint is the
+           smoothness the GCV penalty selects, and the peak is read off wherever the smooth
+           puts it. Concavity ("cv") was used here previously; it forces the whole curve to
+           bend one way, which pulls the fitted maximum toward the middle of the swept
+           range when the real rise and decay are asymmetric.
 
 Everything is fitted against log(x), matching the log x axis of the figures, so "monotone
 in x" and "monotone in log x" are the same constraint and the knots are evenly spread
@@ -43,6 +48,9 @@ import numpy as np
 # a standard interval rather than an arbitrary inflation.
 DEFAULT_LEVEL = 0.99
 
+# The bases scam::scam owns. Anything else is fitted with mgcv::gam instead.
+_SCAM_SHAPES = ("mpi", "mpd", "cv", "cx", "micv", "micx", "mdcv", "mdcx")
+
 _R_CACHE = {}
 
 
@@ -68,6 +76,7 @@ def _r():
     # (and activate() is removed in rpy2 3.6+).
     _R_CACHE["ro"] = ro
     _R_CACHE["scam"] = importr("scam")
+    _R_CACHE["mgcv"] = importr("mgcv")     # unconstrained smooths (bs="tp")
     _R_CACHE["stats"] = importr("stats")
     return _R_CACHE
 
@@ -80,7 +89,9 @@ def scam_fit(x, y, shape="mpi", k=10, x_grid=None, n_grid=300, level=DEFAULT_LEV
     Args:
         x: swept parameter, one entry per replicate (must be positive).
         y: squared cosine similarity of that replicate.
-        shape: scam basis code -- "mpi" (monotone increasing) or "cv" (concave) here.
+        shape: basis code. "mpi" (monotone increasing, via scam) is the constrained case;
+            "tp" is an unconstrained thin-plate smooth fitted with mgcv::gam instead, for
+            the curves that turn over.
         k: spline basis dimension. 10 is scam's default and is ample for these sweeps,
             which have 40-100 distinct x values; the shape constraint, not k, is what
             controls the wiggliness.
@@ -118,10 +129,14 @@ def scam_fit(x, y, shape="mpi", k=10, x_grid=None, n_grid=300, level=DEFAULT_LEV
     ro.globalenv["xx"] = ro.FloatVector(logx)
     ro.globalenv["yy"] = ro.FloatVector(y_fit_scale)
     ro.globalenv["xg"] = ro.FloatVector(np.log(x_grid))
+    # scam's shape-constrained bases live in scam::scam; an unconstrained smooth is an
+    # ordinary mgcv::gam. Both expose the same predict(se.fit) interface and the same
+    # $edf, so only the fitting call differs.
+    fitter = "scam::scam" if shape in _SCAM_SHAPES else "mgcv::gam"
     try:
         ro.r(f'''
             df <- data.frame(xx = xx, yy = yy)
-            fit <- scam::scam(yy ~ s(xx, k = {k_eff}, bs = "{shape}"), data = df)
+            fit <- {fitter}(yy ~ s(xx, k = {k_eff}, bs = "{shape}"), data = df)
             pr  <- predict(fit, newdata = data.frame(xx = xg), se.fit = TRUE)
             fitv <- as.numeric(pr$fit)
             sev  <- as.numeric(pr$se.fit)

@@ -2,7 +2,11 @@
 """
 Data for the three-panel RMT phenomena figure, from the two-population split simulations.
 
-N = 500 samples (250 per population, phi = 0.5), L_input = 2e4 SNP columns.
+N = 400 samples (200 per population, phi = 0.5), L_input = 2e4 SNP columns.
+N = 400 is the level the single_split sweep actually carries, so panel C's curve,
+band and theory come straight from results/sweep_summaries/single_split rather than
+being recomputed here -- and A and B are computed at the same N so all three panels
+describe one demography.
 
     A  one spectrum at a representative Fst: the bulk eigenvalues, for the histogram and
        the two Marchenko-Pastur curves (raw L against L_eff; gamma_eff is cross-checked
@@ -11,9 +15,10 @@ N = 500 samples (250 per population, phi = 0.5), L_input = 2e4 SNP columns.
     B  the gap lambda_1 / lambda_2 across the Fst sweep, the top two eigenvalues computed
        once per Fst -- no replicates.
     C  the PC1 cosine similarity across the same Fst sweep, read directly from the
-       existing results/analysis/SingleSplitSweeps/vary_N.csv at N = 500 (median_cos, the
-       measured median over its own replicates, not a fitted curve) rather than
-       recomputed here. Only the three PC1 scatters are recomputed: one spectrum each at a
+       existing results/analysis/SingleSplitSweeps/vary_N.csv at N = 400 (median_cos, the
+       measured median over its own replicates) rather than recomputed here. The FIGURE
+       draws its curve, band and theory from results/sweep_summaries/single_split instead;
+       cos_sweep.csv is what picks the three inset Fst values and is the fallback. Only the three PC1 scatters are recomputed: one spectrum each at a
        very small Fst, one just above the detection threshold, and one very large Fst.
 
 The spectra are rescaled by 0.5 (SPECTRUM_SCALE) because compute_sample_covariance
@@ -48,7 +53,7 @@ DEFAULT_SIMDIR = os.path.join(SIMULATION_ROOT, "split")
 DEFAULT_NAME = "RMTPhenomena"
 COS_SWEEP_PATH = os.path.join(ANALYSIS_ROOT, "SingleSplitSweeps", "vary_N.csv")
 
-N = 500
+N = 400
 L_INPUT = int(2e4)
 SEED = 0
 SPECTRUM_SCALE = 0.5
@@ -59,7 +64,7 @@ SPECTRUM_SCALE = 0.5
 PANEL_A_INDEX = 70
 
 # Panel C insets: very small Fst (deep sub-threshold), just above the detection threshold,
-# and very large Fst -- read off the existing SingleSplitSweeps/vary_N.csv sweep at N=500,
+# and very large Fst -- read off the existing SingleSplitSweeps/vary_N.csv sweep at N=400,
 # not re-derived here.
 INSET_KEY = ("small", "threshold", "large")
 

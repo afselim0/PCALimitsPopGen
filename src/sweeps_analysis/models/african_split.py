@@ -26,6 +26,7 @@ import sys
 from itertools import combinations_with_replacement
 
 import numpy as np
+from scipy.optimize import brentq
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "analysis"))  # src/analysis/
@@ -34,7 +35,8 @@ from pc_recovery import subsample
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
-from threshold_and_overlap import (approx_nu_c, approx_overlap, exact_nu_c, exact_overlap)
+from threshold_and_overlap import (Phi_2, approx_nu_c, approx_overlap, crude_nu_alpha,
+                                   exact_nu_c, exact_overlap)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from precompute_coal_times import load as load_coal_times
@@ -210,6 +212,24 @@ def axes(ctx, design, sim_row, cfg):
 
 NU_FORM = "analytical_sister"
 
+# Whether x_alpha's crude nu_alpha carries the individual-side heteroskedasticity through
+# Phi_2 as well as through the eps_0 pedestal. TRUE, and the margin is not close.
+# Measured against the numerically-inverted approximate route over all 11 curves of the two
+# OOA3 sweeps (misc/test_scripts/x_alpha_check.py), as mean |x_crude/x_approx - 1|:
+#
+#                        flat 1/nu^2      eps in Phi_2
+#     Fst_0 (threshold)      0.73             0.093
+#     Fst_0.8 (crossing)     0.53             0.34
+#
+# The flat route does not merely lose accuracy here, it changes sign: on this demography
+# eps spans 0.81-1.17 of tau_bar, and at N = 100 the flat sqrt(N/L_eff) = 0.094 falls BELOW
+# eps_0, so subtracting the pedestal returns Fst_0 = -0.0045 -- the sister axis declared
+# detectable at zero divergence. Solving gamma_eff Phi_2(nu) = 1 - alpha on the real K = 4
+# phi/eps instead keeps nu_alpha above the pole at eps_max by construction, so Fst_0 stays
+# positive at every N. One bisection, ~0.1 ms.
+# Set False to recover the flat sqrt(N/(L_eff(1-alpha))) of the other three demographies.
+X_ALPHA_EPS_IN_PHI2 = True
+
 
 def _n_vector(design):
     """Per-population sample sizes, from either a recorded cell row or the n vector."""
@@ -251,6 +271,85 @@ def nu_of_x(ctx, design, sim_row, cfg, measured):
     n = _n_vector(design)
     T = ctx["T"]
     return lambda fst: analytical_nu(T, n, float(fst))
+
+
+def x_alpha(ctx, design, sim_row, cfg, measured, eps_in_phi2=X_ALPHA_EPS_IN_PHI2):
+    """
+    alpha -> the Fst at which the crude (L_eff) route predicts cos^2 = alpha, in closed form.
+
+    nu(Fst) = eps_0 + (1 + eps_0) N phi_tilde Fst carries an additive pedestal, so
+    inverting nu = nu_alpha subtracts it before dividing:
+
+        Fst_alpha = (nu_alpha - eps_0) / ((1 + eps_0) N phi_tilde)
+                  = 1 / ((1 + eps_0) phi_tilde sqrt(N L_eff (1 - alpha)))
+                    - eps_0 / (N phi_tilde (1 + eps_0))
+
+    with eps_0 = tau_sister/tau_bar - 1 and phi_tilde the harmonic mean of the sisters'
+    sampling proportions. The pedestal is subtracted from nu, not from Fst, which is why
+    the second term has no sqrt: it is the Fst that eps_0 alone already buys.
+
+    TWO ROUTES TO nu_alpha, selected by eps_in_phi2 (module default X_ALPHA_EPS_IN_PHI2):
+
+      False  nu_alpha = sqrt(N / (L_eff (1 - alpha))) -- threshold_and_overlap.crude_nu_alpha.
+             eps enters only through the pedestal in the inversion above.
+      True   nu_alpha solves gamma_eff Phi_2(nu_alpha, phi, eps) = 1 - alpha on the full
+             K = 4 phi/eps, i.e. eps also enters the threshold itself. This is the same
+             equation the crude route already solves, with its flat Phi_2 = 1/nu^2 replaced
+             by the real one; it costs one bisection and is what the approximate route uses
+             at alpha = 0.
+
+    See misc/test_scripts/x_alpha_eps_check.py for the comparison of the two against the
+    numerically inverted approximate route.
+    """
+    tc = theory_context(ctx, design, sim_row, cfg, measured)
+    if tc is None:
+        return None
+    n = _n_vector(design)
+    N = int(n.sum())
+    phi = n / N
+    tau = np.diag(ctx["T"])
+    eps_0 = float(tau[SISTER[0]] / float(np.sum(phi * tau)) - 1.0)
+    a, b = SISTER
+    phi_t = 2.0 * float(phi[a]) * float(phi[b]) / (float(phi[a]) + float(phi[b]))
+    L_eff = tc["L_eff"]
+
+    def fst_of_alpha(alpha):
+        if eps_in_phi2:
+            nu_a = _nu_alpha_eps(float(alpha), N, L_eff, tc["phi"], tc["eps"])
+        else:
+            nu_a = crude_nu_alpha(float(alpha), N, L_eff)
+        return (nu_a - eps_0) / ((1.0 + eps_0) * N * phi_t)
+
+    return fst_of_alpha
+
+
+def _nu_alpha_eps(alpha, N, L_eff, phi, eps):
+    """
+    nu at which the eps-aware crude overlap reaches alpha: gamma_eff Phi_2(nu) = 1 - alpha.
+
+    The flat route takes Phi_2 = 1/nu^2, which is only right when every eps_a is 0; here
+    tau/tau_bar spans 0.81-1.17, so Phi_2 differs from 1/nu^2 by tens of percent near the
+    pole. Phi_2 falls monotonically from +inf at nu = max(eps) to 0, so the root is unique
+    and bisection on a bracket grown outward from the pole needs no starting guess.
+    """
+    ge = float(N) / float(L_eff)
+    target = 1.0 - float(alpha)
+    eps = np.asarray(eps, dtype=float)
+    e_max = float(eps.max())
+    scale = max(abs(e_max), np.sqrt(ge), 1.0)
+
+    lo = e_max + scale * 1e-12
+    for _ in range(400):
+        if ge * Phi_2(lo, phi, eps) > target:
+            break
+        lo = e_max + (lo - e_max) / 2.0
+    hi = e_max + 2.0 * scale
+    for _ in range(400):
+        if ge * Phi_2(hi, phi, eps) < target:
+            break
+        hi = e_max + 2.0 * (hi - e_max)
+    return float(brentq(lambda v: ge * Phi_2(v, phi, eps) - target, lo, hi,
+                        xtol=1e-13, rtol=1e-12))
 
 
 def theory_overlap(ctx, design, sim_row, cfg, measured):

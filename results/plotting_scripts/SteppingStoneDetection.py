@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import cm, colors
 
-from crossing_panel import save_figure
+from crossing_panel import figsize, save_figure
 from plotting_style import setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -88,7 +88,7 @@ def panel(ax, df, key, cmap, label, title, n_filter=None, L_filter=None):
 def make_figure(df1, df2, outpath, n_pin=DEFAULT_N_PER_DEME):
     """The four panels, with a colourbar per panel since each encodes a different sweep."""
     setup_plotting_style()
-    fig, axes = plt.subplots(2, 2, figsize=(9.5, 7.2))
+    fig, axes = plt.subplots(2, 2, figsize=figsize(9.5, 7.2))
 
     specs = []
 

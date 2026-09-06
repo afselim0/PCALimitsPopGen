@@ -32,7 +32,7 @@ C  vs N   at fixed H, same story along the other axis.
 D  absolute values vs H, showing both curves parallel on log-log -- the approximation has
    the right shape and the wrong offset.
 
-Reads results/analysis/SisterApproximation, writes results/figures/SisterApproximation.pdf
+Reads results/analysis/SisterApproximation, writes misc/test_figures/SisterApproximation.pdf
 """
 import os
 
@@ -40,12 +40,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from crossing_panel import save_figure
-from plotting_style import okabe_ito, setup_plotting_style
+import sys
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# This script lives outside results/plotting_scripts, so that directory has to be put on
+# the path explicitly for the shared plotting helpers.
+sys.path.append(os.path.join(_PROJECT_ROOT, "results", "plotting_scripts"))
+from crossing_panel import save_figure                              # noqa: E402
+from plotting_style import okabe_ito, setup_plotting_style          # noqa: E402
+
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SisterApproximation")
-FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
+# A side comparison rather than a paper figure, so it writes to the git-ignored misc tree.
+FIGURE_DIR = os.path.join(_PROJECT_ROOT, "misc", "test_figures")
 
 C_RATIO = okabe_ito[1]      # vermillion
 C_EXACT = okabe_ito[0]      # blue

@@ -14,7 +14,7 @@ Columns:
     3  the same at phi_1=phi_2=0.20
 
 
-Reads results/analysis/OOA3Demography, writes results/figures/OOA3Demography.pdf
+Reads results/analysis/OOA3Demography, writes results/figures/DemoAfricanSplit.pdf
 """
 import copy
 import importlib.util
@@ -24,12 +24,13 @@ import sys
 import demes
 import demesdraw
 import matplotlib.pyplot as plt
+from matplotlib.transforms import ScaledTranslation
 import numpy as np
 import pandas as pd
 import stdpopsim
 
-from crossing_panel import save_figure
-from plotting_style import setup_plotting_style
+from crossing_panel import PANEL_LETTER_SIZE, figsize, save_figure
+from plotting_style import ANNOT_PT, setup_plotting_style
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "OOA3Demography")
@@ -40,6 +41,10 @@ from demographies.african_split import demography as ooa3_demography
 
 COLOR_YRI1, COLOR_YRI2 = 'crimson', 'royalblue'
 COLOR_OTHER = '0.8'
+# Half-height of the PC jitter band, on the +/-1.12 axis set in panel_pc.
+JITTER_PC = 1.0
+# Height:width of the PC strips. They carry one axis, so they are short by design.
+PC_BOX_ASPECT = 0.30
 COLOR_ANCESTRAL = '0.6'
 LABELS = ["fst1e-3", "fst1e-2"]   # weakest split first, so panel A is the marginal case
 
@@ -47,7 +52,7 @@ LABELS = ["fst1e-3", "fst1e-2"]   # weakest split first, so panel A is the margi
 # each other, and its default line density (10 per migration edge) is too busy at this
 # figure size. Offsets are in the same units as population size (haploid Ne) and only need
 # to clear each deme's half-width, which doesn't depend on t_split.
-DEME_POSITIONS = {'YRI': 0, 'YRI1': -8500, 'YRI2': 8500, 'CEU': -45000, 'CHB': 52000}
+DEME_POSITIONS = {'YRI': 0, 'YRI1': -15000, 'YRI2': 15000, 'CEU': -52000, 'CHB': 58000}
 DEME_COLOURS = {'YRI': COLOR_ANCESTRAL, 'CEU': COLOR_ANCESTRAL, 'CHB': COLOR_ANCESTRAL,
                 'YRI1': COLOR_YRI1, 'YRI2': COLOR_YRI2}
 
@@ -107,6 +112,17 @@ def _preview_graph(dem, t_split):
     return demes.Graph.fromdict(d)
 
 
+def _sci_tex(x):
+    """Fst as a TeX power of ten: 0.001006 -> 10^{-3}, 0.0203 -> 2\\times 10^{-2}."""
+    exponent = int(np.floor(np.log10(abs(x))))
+    mantissa = x / 10.0 ** exponent
+    # These are round design targets, so the mantissa is 1 to within rounding and printing
+    # it ("1 x 10^-3") would only add noise.
+    if abs(mantissa - 1.0) < 0.05:
+        return rf'10^{{{exponent}}}'
+    return rf'{mantissa:.0f}\times 10^{{{exponent}}}'
+
+
 def panel_demography(ax, t_split, Fst):
     """demesdraw tube plot, log time axis so both depths are legible on one scale."""
     dem = ooa3_demography(t_split)
@@ -116,9 +132,10 @@ def panel_demography(ax, t_split, Fst):
     # YRI is the unsampled split ancestor -- zero width at present, and its tick label
     # only crowds the space between its two children.
     ax.set_xticklabels(['' if t.get_text() == 'YRI' else t.get_text()
-                        for t in ax.get_xticklabels()])
+                        for t in ax.get_xticklabels()],
+                       fontsize=ANNOT_PT * 0.85)
     ax.set_title(rf'$t_{{\mathrm{{split}}}}={t_split:.0f}$ generations ago' + '\n' +
-                rf'$F_{{ST}}={Fst:.0e}$')
+                rf'$F_{{ST}}={_sci_tex(Fst)}$')
 
 
 def panel_pc(ax, pc1_row):
@@ -133,16 +150,23 @@ def panel_pc(ax, pc1_row):
     pc1 = pc1_row.pc1.values
     rank = int(pc1_row["rank"].iloc[0])
     rng = np.random.default_rng(0)
-    jitter = rng.uniform(-1, 1, len(pc1))
+    # A shallow band, not the full panel: the y axis carries no quantity, and jitter
+    # spread over the whole box reads as a second axis of variation.
+    jitter = rng.uniform(-JITTER_PC, JITTER_PC, len(pc1))
 
     other = ~np.isin(pop, ["YRI1", "YRI2"])
-    ax.scatter(pc1[other], jitter[other], s=3, color=COLOR_OTHER, alpha=0.6,
+    ax.scatter(pc1[other], jitter[other], s=2.0, color=COLOR_OTHER, alpha=0.6,
               edgecolors='none', zorder=1)
     for p, color in [("YRI1", COLOR_YRI1), ("YRI2", COLOR_YRI2)]:
         sel = pop == p
-        ax.scatter(pc1[sel], jitter[sel], s=5, color=color, alpha=0.85,
+        ax.scatter(pc1[sel], jitter[sel], s=2.5, color=color, alpha=0.85,
                   edgecolors='none', zorder=2, label=p)
     ax.set_yticks([])
+    # Clipped right around the jitter band, with the left spine removed: there is no y
+    # quantity for either the range or the spine to describe. Combined with the short box
+    # aspect set in make_figure, this puts the x axis just under the points.
+    ax.set_ylim(-1.12, 1.12)
+    ax.spines['left'].set_visible(False)
     ax.set_xlabel(f'PC{rank + 1} (YRI1/YRI2 axis)')
     return float(pc1_row.overlap.iloc[0])
 
@@ -154,7 +178,17 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
     phis = sorted(pc1.phi.unique())
 
-    fig, axes = plt.subplots(len(LABELS), 3, figsize=(12.0, 7.0))
+    # Two blocks (one per t_split), each a tall demography panel beside a SHORT PC strip.
+    # The strip gets its own short gridspec row rather than a short box inside a tall one:
+    # squeezing it with set_box_aspect left a void under it the height of the demography.
+    fig = plt.figure(figsize=figsize(9.0, 5.6))
+    outer = fig.add_gridspec(len(LABELS), 1, hspace=0.55)
+    axes = np.empty((len(LABELS), 3), dtype=object)
+    for i in range(len(LABELS)):
+        inner = outer[i].subgridspec(2, 3, height_ratios=[0.001, 1.0], wspace=0.30)
+        axes[i, 0] = fig.add_subplot(inner[:, 0])
+        for j in (1, 2):
+            axes[i, j] = fig.add_subplot(inner[1, j])
 
     for i, label in enumerate(LABELS):
         t_split = float(meta.loc[label, "t_split"])
@@ -166,17 +200,26 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
             d = pc1[(pc1.label == label) & (pc1.phi == phi)]
             overlap = panel_pc(axes[i, j], d)
             axes[i, j].set_title(rf'$\phi_1=\phi_2={phi:g}$' + '\n' +
-                                 f'cosine similarity={overlap:.3f}')
+                                 rf'$\langle\hat u,u\rangle^2 = {overlap:.3f}$')
 
     # axes[0, 1].legend(loc='upper right', fontsize=8, frameon=False, markerscale=2)
 
-    for k, letter in enumerate("ABCDEFGHI"[:axes.size]):
-        ax = axes.flat[k]
-        ax.text(-0.12, 1.0, letter, transform=ax.transAxes,
-                fontsize=13, fontweight='bold', va='bottom', ha='right')
+    # Each ROW is one t_split, so the figure has two labelled units, not six. The letter
+    # sits beside the demography panel that opens its row.
+    for ax, letter in zip(axes[:, 0], "AB"):
+        ax.text(0.0, 1.0, letter, transform=ax.transAxes + ScaledTranslation(
+            -26 / 72, 16 / 72, fig.dpi_scale_trans),
+            fontsize=PANEL_LETTER_SIZE, fontweight='bold', va='top', ha='left')
 
-    fig.tight_layout()
-    out = save_figure(fig, figure_dir, "OOA3Demography")
+    # The PC strips are short and sit on the FLOOR of their block, level with the bottom
+    # of the demography beside them, so every x axis in the figure lines up. They show one
+    # axis -- PC3 -- with jitter standing in for nothing at all, so height spent on them
+    # only invites reading the vertical spread as a second dimension.
+    for ax in axes[:, 1:].flat:
+        ax.set_box_aspect(PC_BOX_ASPECT)
+        ax.set_anchor("S")
+
+    out = save_figure(fig, figure_dir, "DemoAfricanSplit")
     print(f"wrote {out}")
     return fig
 

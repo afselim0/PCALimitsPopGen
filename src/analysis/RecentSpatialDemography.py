@@ -10,13 +10,13 @@ PC3 are taken by eigenvalue rank -- literally, not located by overlap with the
 theoretical spatial axis: PC1 is the A/B split and PC2/PC3 carry the grid's spatial
 pair, and the figure shows all three as they fall out of the spectrum. Their overlap
 with the theoretical (1,0)/(0,1) spatial pair is still reported in meta.csv as a
-diagnostic. They are computed from a genotype matrix subsampled to N_total split
-phi/(1-phi) between B (evenly over K^2 demes) and A, per CLAUDE.md's phi convention
-(B's total share of N) -- not the simulation's raw full sample sizes, which only
-coincidentally give a clean phi (the previous version plotted those directly, so
-phi=0.5 silently meant whatever aggregate split the simulation config happened to use,
-with each deme carrying the full simulated n_per_deme_B rather than its N_total*phi/K^2
-share). Each B sample is labeled by its deme's grid position for the plotting script to
+diagnostic. They are computed from EVERY sample the simulation wrote -- no subsampling of
+rows; only the L SNP columns are drawn. phi is therefore descriptive, not a design
+point: it is whatever n_A against K^2 * n_per_deme_B gives (0.509 on the K9 cell, from
+n_A=5000 and 81 x 64 = 5184), and the run prints the realised N and phi. An earlier
+version subsampled to N_total split phi/(1-phi), which made phi exact at the cost of
+using ~10% of the samples; `sample_design` below still implements that and is kept for
+callers that want it. Each B sample is labeled by its deme's grid position for the plotting script to
 color by.
 
 Outputs (results/analysis/RecentSpatialDemography):
@@ -129,12 +129,18 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
     K = int(params["K"].iloc[0])
     t_split = t_split if t_split is not None else float(params["t_split"].iloc[0])
     Ne_ancestral = Ne_ancestral if Ne_ancestral is not None else float(params["Ne_ancestral"].iloc[0])
-    n_A, n_per_deme_B = sample_design(phi, N_total, K * K,
-                                      int(params["n_per_pop_A"].iloc[0]),
-                                      int(params["n_per_deme_B"].iloc[0]))
+    # ALL samples: the sizes the simulation actually wrote. phi and N_total are therefore
+    # descriptive here, not design points -- the previous version subsampled to N_total
+    # split phi/(1-phi), which is what made phi a controlled quantity. Reported below so
+    # the realised split is visible rather than assumed.
+    n_A = int(params["n_per_pop_A"].iloc[0])
+    n_per_deme_B = int(params["n_per_deme_B"].iloc[0])
+    N_realised = n_A + n_per_deme_B * K * K
+    phi_realised = n_per_deme_B * K * K / N_realised
     if verbose:
-        print(f"phi={phi:g}, N_total={N_total}: n_A={n_A}, n_per_deme_B={n_per_deme_B} "
-             f"(x{K*K} demes = {n_per_deme_B * K * K})")
+        print(f"all samples: n_A={n_A}, n_per_deme_B={n_per_deme_B} "
+             f"(x{K*K} demes = {n_per_deme_B * K * K}), N={N_realised}, "
+             f"phi={phi_realised:.4f}")
 
     nu_1_per_row = np.array([
         within_B_F_hat(K, float(r.m), t_split, Ne_ancestral, n_per_deme_B)[0][0]
@@ -153,9 +159,13 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
         meta_rows.append(dict(label=label, m=m, M=M, nu_1=float(nu[0]),
                               t_split=t_split, simID=params.simID.iloc[i]))
         rng = np.random.default_rng([seed, i])
-        n = np.concatenate([[n_A], np.full(K_demes, n_per_deme_B)])
+        # EVERY sample in the simulation, not a subsample: n == n_available, so subsample
+        # only draws the L SNP columns. phi is then whatever the simulation's own sample
+        # sizes give (n_A against K^2 * n_per_deme_B), NOT the phi argument -- see the note
+        # on sample_design below.
         n_available = np.concatenate(
             [[int(params.n_per_pop_A.iloc[i])], np.full(K_demes, int(params.n_per_deme_B.iloc[i]))])
+        n = n_available
         sub = subsample(arrays[i], n, L, rng, n_available=n_available,
                         L_polymorphic=True)
         pc = sample_eigenvectors(sub, [0, 1, 2])   # literal PC1, PC2, PC3 by eigenvalue

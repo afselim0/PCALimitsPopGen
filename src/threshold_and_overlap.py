@@ -256,7 +256,11 @@ estimates compared directly.
 
   3. Crude         crude_nu_c(N, L_eff)
                    crude_overlap(nu_k, N, L_eff)
+                   crude_nu_alpha(alpha, N, L_eff)
      One number, L_eff = effective_L(h). Neglects eps and delta both.
+     crude_nu_alpha inverts the overlap analytically, dropping the
+     (1 + gamma_eff/nu) denominator so that each demography's crossing has a
+     closed form in Fst or M; alpha = 0 recovers crude_nu_c.
 
 INVARIANT: the threshold depends only on N, L, phi_a and eps_a -- never on nu.
 None of the three nu_c functions takes a nu argument, and that is deliberate;
@@ -611,6 +615,30 @@ def crude_overlap(nu_k, N, L_eff):
     if nu_k <= np.sqrt(ge):
         return 0.0
     return float(max((1.0 - ge / nu_k ** 2) / (1.0 + ge / nu_k), 0.0))
+
+
+def crude_nu_alpha(alpha, N, L_eff):
+    """
+    The spike at which the crude overlap reaches `alpha`, in closed form:
+
+        nu_alpha = sqrt(gamma_eff / (1 - alpha)),      gamma_eff = N / L_eff.
+
+    This drops the (1 + gamma_eff/nu) denominator of crude_overlap, i.e. it solves
+    1 - gamma_eff/nu^2 = alpha rather than the full ratio. That is the gamma_eff -> 0
+    limit and is what makes the crossing invertible analytically in each demography
+    (see the four x_alpha closures in src/sweeps_analysis/models/), which is the whole
+    point of this route -- the exact and approximate routes already invert numerically.
+
+    The price is a systematic under-estimate of nu_alpha, hence an early crossing:
+    the ratio to the full crude inversion is 1.03 at gamma_eff = 1e-3, 1.09 at 1e-2 and
+    1.32 at 0.1 (alpha = 0.8). At alpha = 0 it reduces exactly to crude_nu_c.
+
+    Returns nu_c itself at alpha = 0, so `crude_nu_alpha(0, ...) == crude_nu_c(...)`.
+    """
+    alpha = float(alpha)
+    if not 0.0 <= alpha < 1.0:
+        raise ValueError(f"alpha must be in [0, 1), got {alpha:g}")
+    return float(np.sqrt(_crude_gamma_eff(N, L_eff) / (1.0 - alpha)))
 
 
 # --- back to the observed scale ------------------------------------------

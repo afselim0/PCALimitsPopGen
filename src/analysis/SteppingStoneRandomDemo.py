@@ -6,9 +6,15 @@ A demonstration that, at a FIXED migration rate, how densely the demes are sampl
 whether PCA recovers the spatial structure at all.
 
 One M per dimension (M_TARGETS), chosen to sit in the regime where sparse sampling fails
-and dense sampling succeeds, and three sampling fractions phi in [0.2, 0.4, 0.6] at
-n_per_deme = 8. Migration is held fixed across the whole figure so the only thing varying
-along a row is the sampling scheme.
+and dense sampling succeeds, and three sampling fractions phi in [0.2, 0.4, 0.6] at a FIXED
+TOTAL N (N_TOTAL: 200 in 1D, 600 in 2D), n-per-deme being derived as N_total / demes
+sampled. Migration is held fixed across the whole figure so the only thing varying along a
+row is the sampling scheme.
+
+Total N is held fixed rather than n-per-deme so the figure varies deme coverage ALONE. With
+n_per_deme = 8 fixed, as previously, N grew with phi (1D: 40 -> 120) and the panels
+conflated sampling more demes with sampling more individuals. This matches sweep configs 06
+and 08, which hold the same totals.
 
 PCs are sign-fixed (1D) and procrustes-aligned (2D) to the closed-form eigenvectors
 oriented so that PC1 increases with chain position / column and PC2 increases with row,
@@ -48,11 +54,26 @@ from stepping_stone_grid import (closed_form_eigenvector_1d, closed_form_eigenve
 DEFAULT_NAME = "SteppingStoneRandomDemo"
 SWEEP_NAME = "SteppingStoneRandomSampling"   # supplies the M grid this demo picks from
 PHI_VALUES = [0.2, 0.4, 0.6]
-N_PER_DEME = 8
+# Total samples, split evenly over whichever demes are drawn; n-per-deme is DERIVED from
+# this per phi (see n_per_deme_for). Matches configs 06/08 so the demo and the sweep show
+# the same design. 1D: 5/10/15 demes -> 40/20/13 per deme. 2D: 16/32/49 -> 37/18/12.
+N_TOTAL = {1: 200, 2: 600}
 SEED = 0
-# One target M per dimension, in the regime where sparse sampling misses the structure
-# that dense sampling recovers.
-M_TARGETS = {1: 500.0, 2: 50.0}
+# One target M per dimension. The two dimensions are chosen on OPPOSITE criteria, because
+# holding total N fixed changes what each one has to show:
+#   2D  M = 6.7, the largest separation across phi that survives fixed N -- cos^2 runs
+#       0.84 / 0.89 / 0.95, so deme coverage genuinely helps here.
+#   1D  M = 790, chosen to be FLAT (the nearest simulated M is 811; sweep medians there run
+#       cos^2 0.742 / 0.736 / 0.798, spread 0.062) -- the partial-recovery regime, where a
+#       real effect would be plainly visible if there were one. At fixed N, 1D deme coverage has no effect that stands out from draw-to-draw
+#       noise: only 8 of 100 simulated M even give a monotone increase in phi (2D: 75 of
+#       100), and single draws at the most-separated M scatter from 0.00 to 0.75 at one phi
+#       (2 of 12 seeds monotone). A "separated" 1D panel can only be produced by picking a
+#       flattering seed, so the panel reports the flat result instead. This is the same M
+#       the figure used before, when n-per-deme was fixed at 8 and N grew 40 -> 120 across
+#       the row -- the separation it showed then was sample size, not deme coverage.
+# Medians over the sweep replicates (results/sweep_summaries/stepping_stone_random).
+M_TARGETS = {1: 790.0, 2: 6.7}
 
 
 def sample_demes(K_demes, phi, rng):
@@ -60,21 +81,32 @@ def sample_demes(K_demes, phi, rng):
     return np.sort(rng.choice(K_demes, n_sampled, replace=False))
 
 
+
+def n_per_deme_for(K_demes, phi, N_total):
+    """n-per-deme spreading N_total over the demes a fraction phi retains.
+
+    Floor, not round: the cell must never request more samples than were simulated per deme.
+    """
+    return max(int(N_total // max(int(round(phi * K_demes)), 1)), 1)
+
+
 def pick_m_row(params, dimension, sweep_name=SWEEP_NAME):
     """The simulated M closest to this dimension's M_TARGETS, as (array index, sweep row).
 
     The simulation directory holds two sweeps under different naming conventions (an older
-    invM* set, which owns the parameters CSV, and the m* set the overlap sweeps actually
-    used, whose M and L survive only in the sweep table). Picking from the sweep table
-    keeps this demo on the same M grid as figure 10.
+    invM* set, which owns the parameters CSV and the .npy files, and the m* set the overlap
+    sweeps used, whose L survives only in the sweep table). The two simID spaces are
+    DISJOINT, so the sweep row is matched to a simulation by M VALUE, not by simID -- an
+    identity match only ever resolved for the handful of targets whose nearest sweep row
+    happened to carry an invM id, and raised KeyError for every other target.
     """
     sweep = pd.read_csv(os.path.join(ANALYSIS_ROOT, sweep_name, f"random_{dimension}D.csv"))
     sweep = sweep.drop_duplicates("simID")
     row = sweep.iloc[int(np.argmin(np.abs(sweep.M.values - M_TARGETS[dimension])))]
-    simID_to_index = {s: i for i, s in enumerate(params.simID)}
-    if row.simID not in simID_to_index:
-        raise KeyError(f"{dimension}D: sweep simID {row.simID} has no simulation file")
-    return simID_to_index[row.simID], row
+    i = int(np.argmin(np.abs(params.M.values - row.M)))
+    if not np.isclose(params.M.values[i], row.M, rtol=0.02):
+        raise KeyError(f"{dimension}D: no simulation within 2% of sweep M={row.M:.1f}")
+    return i, row
 
 
 def demo_1d(Z, K, n_per_deme, phi, L, rng):
@@ -132,7 +164,7 @@ def demo_2d(Z, K, n_per_deme, phi, L, rng):
     return deme_df, pc_df, cos
 
 
-def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, phi_values=PHI_VALUES, L=None,
+def run(name=DEFAULT_NAME, n_total=None, phi_values=PHI_VALUES, L=None,
         seed=SEED, verbose=True):
     outdir = os.path.join(ANALYSIS_ROOT, name)
     os.makedirs(outdir, exist_ok=True)
@@ -147,14 +179,17 @@ def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, phi_values=PHI_VALUES, L=None,
 
         i, row = pick_m_row(params, dimension)
         L_cell = L if L is not None else int(row.L)
-        M_c = critical_M(K, n_per_deme, L_cell, dimension)
-        meta_rows.append(dict(dimension=dimension, simID=row.simID, m=float(row.m),
-                              M=float(row.M), M_c=M_c, M_over_Mc=float(row.M) / M_c, K=K))
+        N_tot = (n_total or N_TOTAL)[dimension]
+        K_demes = num_demes(K, dimension)
+        # n-per-deme now varies with phi, so the critical M does too; it is reported per
+        # phi rather than once for the dimension.
         if verbose:
-            print(f"{dimension}D: simID={row.simID}, M={float(row.M):.0f}, "
-                  f"M/M_c={float(row.M) / M_c:.3f}")
+            print(f"{dimension}D: simID={row.simID}, M={float(row.M):.0f}, N_total={N_tot}")
 
         for phi in phi_values:
+            n_per_deme = n_per_deme_for(K_demes, phi, N_tot)
+            n_demes = max(int(round(phi * K_demes)), 1)
+            M_c = critical_M(K, n_per_deme, L_cell, dimension)
             rng = np.random.default_rng([seed, dimension, int(round(phi * 100))])
             deme_df, pc_df, cos = demo_func(arrays[i], K, n_per_deme, phi, L_cell, rng)
             deme_df["dimension"], deme_df["phi"] = dimension, phi
@@ -162,8 +197,14 @@ def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, phi_values=PHI_VALUES, L=None,
             pc_df["cos"] = cos
             deme_rows.append(deme_df)
             pc_rows.append(pc_df)
+            meta_rows.append(dict(dimension=dimension, phi=phi, simID=row.simID,
+                                  m=float(row.m), M=float(row.M), M_c=M_c,
+                                  M_over_Mc=float(row.M) / M_c, K=K,
+                                  n_per_deme=n_per_deme, n_demes=n_demes,
+                                  N=n_demes * n_per_deme, N_total=N_tot))
             if verbose:
-                print(f"  phi={phi:g}: cos={cos:.3f}")
+                print(f"  phi={phi:g}: n_per_deme={n_per_deme}, N={n_demes * n_per_deme}, "
+                      f"M/M_c={float(row.M) / M_c:.3f}, cos={cos:.3f}")
 
     pd.concat(deme_rows, ignore_index=True).to_csv(
         os.path.join(outdir, "sampled_demes.csv"), index=False)
@@ -178,11 +219,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--name", default=DEFAULT_NAME)
-    p.add_argument("--n-per-deme", type=int, default=N_PER_DEME)
     p.add_argument("--L", type=int, default=None)
     p.add_argument("--seed", type=int, default=SEED)
     args = p.parse_args()
-    run(name=args.name, n_per_deme=args.n_per_deme, L=args.L, seed=args.seed)
+    run(name=args.name, L=args.L, seed=args.seed)
 
 
 if __name__ == "__main__":

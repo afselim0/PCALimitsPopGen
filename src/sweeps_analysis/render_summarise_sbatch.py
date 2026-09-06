@@ -21,14 +21,14 @@ from cli_common import PROJECT_ROOT
 TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "sbatch_summarise.template")
 
-# group -> the sweeps that make it up. stepping_stone_stride is deliberately absent:
-# configs 11/12 have never produced sweep output, so there is nothing to summarise.
+# group -> the sweeps that make it up.
 GROUPS = {
     "single_split": ["split_vary_N", "split_vary_phi"],
     "african_split": ["african_split_vary_N", "african_split_vary_harmonic_phi"],
     "stepping_stone_even": ["ss1d_vary_n", "ss2d_vary_n"],
     "stepping_stone_random": ["ss1d_vary_deme_fraction", "ss2d_vary_deme_fraction"],
     "split_stepping_stone": ["split_ss_vary_N", "split_ss_vary_phi"],
+    "stepping_stone_stride": ["ss1d_vary_deme_stride", "ss2d_vary_deme_stride"],
 }
 
 

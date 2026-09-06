@@ -1,4 +1,4 @@
-# 2D stepping stone, n-per-deme fixed, varying the proportion of demes sampled.
+# 2D stepping stone, TOTAL N fixed, varying the proportion of demes sampled.
 # Per-replicate deme resampling, as in config 06.
 model: stepping_stone
 name: ss2d_vary_deme_fraction
@@ -13,11 +13,19 @@ seed: 0
 
 fixed:
   dimension: 2
+  K: 9                   # designs() needs the lattice size before any simulation row is read
   L: 10000
-  L_polymorphic: true   # exact width; 11532 polymorphic at the smallest cell (frac=0.2, N=128)
+  # exact width. Worst observed polymorphic width 14599, at frac 0.2 (13 sims x 16
+  # replicates); 10000 leaves 31% headroom. The old note cited 11532 at N=128, the
+  # smallest cell when n_per_deme was fixed at 8; N_total: 600 removes that cell.
+  L_polymorphic: true
 
 sampling:
-  fixed: {n_per_deme: 8}
+  # N_total fixed, NOT n_per_deme -- see config 06. Every cell draws the same 600 samples,
+  # so the sweep isolates the effect of spreading them over fewer demes.
+  # Derived n-per-deme (K=9, 81 demes): frac 0.2 -> 16 demes -> 37; 0.4 -> 32 -> 18;
+  # 0.6 -> 49 -> 12; 0.8 -> 65 -> 9; 1.0 -> 81 -> 7.
+  fixed: {N_total: 600}
   vary:
     param: deme_fraction
     values: [0.2, 0.4, 0.6, 0.8, 1.0]

@@ -26,7 +26,7 @@ optimizer, because RSS is non-smooth in `tau` -- points switch segments discrete
 (Hinkley 1969; Chiu, Lockhart & Routledge 2006 for the flat-then-rising "bent cable").
 Every candidate uses the same basis and the same criterion (weighted RSS), so nothing in
 the comparison depends on which hypothesis is being tested. Whether a curve has a plateau
-at all is decided separately and directly from the data -- see `below_noise_floor`.
+at all is decided by judging the plateau the fit finds -- see `plateau_rejected`.
 
 Two estimands come off the SAME fitted curve, so the drawn line and the reported numbers
 can never disagree:
@@ -177,39 +177,47 @@ def replicate_weights(t, y, n_bin=20, floor_frac=0.05):
     return 1.0 / var
 
 
-NOISE_FLOOR = 0.15
+MAX_PLATEAU = 0.25
 
 
-def below_noise_floor(x, y, n_levels=3, floor=NOISE_FLOOR):
+def plateau_rejected(c_fit, max_plateau=MAX_PLATEAU):
     """
-    Does this curve start at the finite-N noise floor, i.e. is its transition inside the
-    swept range?
+    Is the fitted constant segment too high to be a sub-threshold plateau?
 
-    Returns True when the curve is ALREADY detecting at the smallest swept x -- the median
-    over its lowest `n_levels` x values sits above `floor` -- so the transition lies below
-    the data and tau is a bound rather than a measurement.
+    The model always offers an interior break, so a sweep that begins ABOVE its transition
+    still gets one -- fitted partway up the rise, with the "plateau" just the weighted mean
+    of a climbing segment. This rejects that: a genuine sub-threshold plateau sits at the
+    finite-N noise level, and a fitted constant of 0.25+ is a rising segment however good
+    the fit looks. tau is then a bound (the transition is below the swept range), which
+    `tau_below_range` records, and the curve is refitted with no plateau at all.
 
-    This is a property of the data, deliberately not of the fit. The alternative, letting
-    the no-plateau candidate win or lose on fit, does not work once every candidate shares
-    a basis: over the 22 stepping-stone curves the two hypotheses are separated by RSS on
-    only ~15, and raising the basis count to help buys nothing (the errors are all "claims
-    a plateau", never the reverse) while degrading tau on the split sweeps from 1.01 to
-    0.72. Making the call explicitly on the data keeps the estimator symmetric.
+    The fitted `c` separates the two classes with a clean gap where raw statistics do not.
+    Over the 41 detection curves: real plateaus run 0.003-0.229, curves past their
+    transition run 0.273-0.733. Any threshold in [0.23, 0.27] classifies all 41 correctly;
+    0.25 is the middle of that gap.
 
-    `floor` is a convention, not a derived constant, and is stated as one. The physically
-    motivated alternative -- the chance-alignment level k/N for a random unit vector -- is
-    the right order for the split and OOA3 sweeps (measured plateau is 0.3-5.4x k/N) but
-    does not separate the stepping-stone curves (0.4x to 1170x, overlapping), and the
-    measured sub-threshold floor is known not to follow the 1/N scaling anyway: it sits
-    flat at ~0.005 regardless of N. 0.15 sits in a wide gap for these sweeps -- curves with
-    a real plateau start at 0.01-0.12, curves past their transition at 0.17-0.73 -- but it
-    is a reporting choice about when tau is worth quoting, not a detected physical level.
+    Two rejected alternatives, both tested:
+
+    A fixed window into the DATA (median of the lowest three x levels > 0.15) reaches only
+    95%: it overlaps, because a fixed window does not know where the break is. Three curves
+    with real plateaus have a leading median near 0.19 while curves past their transition
+    start as low as 0.17. `c` uses the segment the model itself calls flat, so it adapts.
+
+    A slope test on the left of the sweep -- H0: zero slope, reject means no plateau --
+    tops out at 85-88% over ANY alpha, and the alpha it wants is 1e-66 to 1e-320. With ~800
+    replicates the test has enormous power and correctly rejects flatness on curves whose
+    plateau sits at cos^2 = 0.003, because the sub-threshold segment really does drift
+    upward slightly (about 1.4% of the full range; the theory's own cos^2 leaves zero
+    smoothly and finite N smears it further). The decision needs a MAGNITUDE, not a
+    significance: "is the slope big enough to matter", which a p-value cannot express.
+
+    Caveats. The gap is 1.19x wide, clean on these 41 curves but not a law -- new sweeps
+    could land inside it. And `c` comes from an ungated fit that is then used to decide
+    whether to gate, so unlike a raw data statistic the criterion is not independent of the
+    model; operationally that is fine (fit, check c, refit if rejected) but it is worth
+    stating.
     """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    lv = np.unique(x)[:max(int(n_levels), 1)]
-    lead = y[np.isin(x, lv)]
-    return bool(lead.size and float(np.median(lead)) > floor)
+    return bool(np.isfinite(c_fit) and c_fit > max_plateau)
 
 
 def _profile(t, y, w, grid, n_basis, lam, min_left, min_right, no_plateau=False):
@@ -224,7 +232,7 @@ def _profile(t, y, w, grid, n_basis, lam, min_left, min_right, no_plateau=False)
     begins above its transition has no plateau at all, and forcing one makes the model
     flatten a genuinely rising left segment and report a break that is an artifact of
     `min_left`. Whether that candidate wins is NOT how the pipeline decides a curve has no
-    plateau, though: that call is made directly from the data (see `below_noise_floor`),
+    plateau, though: that call is made by judging the fitted plateau (see `plateau_rejected`),
     because with a common basis the two hypotheses are not reliably separated by fit alone.
 
     Raw RSS rather than GCV. GCV was here to charge the no-plateau candidate for having one
@@ -297,16 +305,22 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
     t = np.log(x)
     w = replicate_weights(t, y) if weighted else np.ones_like(y)
 
-    # Decide from the DATA whether this curve has a plateau at all, then fit accordingly.
-    # The verdict has to reach the fit, not just the reported flag: on ss1d n=4 the interior
-    # break beat the no-plateau candidate by 1.02x in RSS and the drawn curve carried a flat
-    # segment at cos^2 = 0.75, which is exactly the artifact the flag exists to rule out.
-    below_range = below_noise_floor(x, y)
+    # Fit once with an interior break allowed, then judge the plateau it found. A fitted
+    # constant too high to be a sub-threshold floor means the curve was already detecting at
+    # the smallest swept x, so refit with no plateau at all. The verdict has to reach the
+    # fit and not just the reported flag: on ss1d n=4 the interior break beat the no-plateau
+    # candidate by 1.02x in RSS and the drawn curve carried a flat segment at cos^2 = 0.75,
+    # which is exactly the artifact this rules out. See plateau_rejected.
     grid = np.linspace(np.quantile(t, lo_q), np.quantile(t, hi_q), n_grid)
-    best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right,
-                    no_plateau=below_range)
+    best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right)
     if best is None:
         return None
+    plateau_tested = float(best[3])
+    below_range = plateau_rejected(plateau_tested)
+    if below_range:
+        best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right, no_plateau=True)
+        if best is None:
+            return None
     _, rss, tau, c, coef, knots = best
 
     if x_grid is None:
@@ -330,6 +344,7 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
                 tau=float(np.exp(tau)), tau_lo=tau_lo, tau_hi=tau_hi,
                 plateau=float(c), edf=float(2 + int((coef > 1e-10).sum())),
                 plateau_rho=rho, below_range=below_range,
+                plateau_tested=plateau_tested,
                 shape="flat_then_mono", lam=float(lam), level=level,
                 n_points=int(x.size), n_levels=int(np.unique(x).size))
 
@@ -447,8 +462,14 @@ def transition_with_ci(fit, edge_frac=0.02):
     `tau_at_edge`  the break sits in the first or last sliver of the swept range, so the
         transition is outside the data and the value is a bound.
 
-    `tau_below_range`  the fit chose the no-plateau candidate, i.e. the curve is already
-        rising at the smallest swept x, so the transition is BELOW the data. `tau` is then
+    `tau_below_range`  the fitted plateau was too high to be a sub-threshold floor, so the
+        curve is already detecting at the smallest swept x and the transition is BELOW it.
+        The value the gate JUDGED is `plateau_tested` -- the constant from the ungated fit.
+        `plateau` is the constant of the fit finally used, which for a rejected curve is the
+        no-plateau refit's left-edge level and is therefore LOWER, often well under the
+        threshold. Compare a flag against plateau_tested, never against plateau: on
+        ss1d_vary_deme_stride p=3 the gate saw 0.81 and rejected, while the stored plateau
+        reads 0.20. `tau` is then
         the left edge and is a bound, not a measurement -- report only the crossing. Every
         1D stepping-stone curve is in this regime, and so are the larger-n 2D ones.
 
@@ -458,13 +479,15 @@ def transition_with_ci(fit, edge_frac=0.02):
     """
     if fit is None or not np.isfinite(fit.get("tau", np.nan)):
         return dict(tau=np.nan, tau_lo=np.nan, tau_hi=np.nan, plateau=np.nan,
-                    tau_at_edge=False, tau_below_range=False, plateau_rho=np.nan)
+                    tau_at_edge=False, tau_below_range=False,
+                    plateau_tested=np.nan, plateau_rho=np.nan)
     xg = fit["x_grid"]
     lo_edge, hi_edge = xg[int(len(xg) * edge_frac)], xg[int(len(xg) * (1 - edge_frac)) - 1]
     return dict(tau=fit["tau"], tau_lo=fit["tau_lo"], tau_hi=fit["tau_hi"],
                 plateau=fit["plateau"],
                 tau_at_edge=bool(fit["tau"] <= lo_edge or fit["tau"] >= hi_edge),
                 tau_below_range=bool(fit.get("below_range", False)),
+                plateau_tested=fit.get("plateau_tested", np.nan),
                 plateau_rho=fit.get("plateau_rho", np.nan))
 
 

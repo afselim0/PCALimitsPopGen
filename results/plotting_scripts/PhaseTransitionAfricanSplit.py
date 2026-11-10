@@ -88,7 +88,7 @@ def panel_demography(ax, t_split):
     graph = _preview_graph(ooa3_demography(t_split), t_split)
     demesdraw.tubes(graph, ax=ax, log_time=True, num_lines_per_migration=2,
                     positions=DEME_POSITIONS, colours=DEME_COLOURS, labels="xticks",
-                    fill=True)
+                    fill=True, seed=1)
     # YRI is the unsampled split ancestor; its tick label only crowds YRI1/YRI2
     ax.set_xticks([DEME_POSITIONS[p] for p in ("CEU", "YRI1", "YRI2", "CHB")])
     ax.set_xticklabels(["CEU", "YRI1", "YRI2", "CHB"], fontsize=gs.TICK_PT)

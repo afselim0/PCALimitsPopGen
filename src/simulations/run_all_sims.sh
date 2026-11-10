@@ -1,5 +1,6 @@
 #!/bin/bash
-# Submit a SLURM array job for every config in src/simulations/configs/, from midway3.
+# Submit a SLURM array job for every config in src/simulations/configs/ (run inside the
+# conda env).
 # Each config is rendered and submitted via run_simulation.py --submit (see sbatch.py),
 # which auto-sizes --array from the config's own parameter table and probes mem/time/cpus
 # unless the config's cluster: block already gives them.
@@ -12,9 +13,6 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 CONFIG_DIR="$HERE/configs"
-
-source /software/bin/miniconda3/etc/profile.d/conda.sh
-conda activate /project/jnovembre/afselim/pca_rmt
 
 cd "$REPO_ROOT"
 for config in "$CONFIG_DIR"/*.yaml; do

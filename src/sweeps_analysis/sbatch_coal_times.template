@@ -18,8 +18,7 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-source /software/bin/miniconda3/etc/profile.d/conda.sh
-conda activate /project/jnovembre/afselim/pca_rmt
+{conda_activate}
 python src/sweeps_analysis/precompute_coal_times.py \
     --simdir {simdir} \
     --task-index "${{SLURM_ARRAY_TASK_ID}}"

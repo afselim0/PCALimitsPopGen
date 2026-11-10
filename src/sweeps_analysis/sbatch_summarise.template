@@ -21,7 +21,6 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-source /software/bin/miniconda3/etc/profile.d/conda.sh
-conda activate /project/jnovembre/afselim/pca_rmt
+{conda_activate}
 python src/sweeps_analysis/summarise.py {sweep_dirs} --out {out} \
     --n-jobs ${{SLURM_CPUS_PER_TASK:-16}}

@@ -10,7 +10,6 @@
 
 mkdir -p slurm_runs/coal_times
 
-source /software/bin/miniconda3/etc/profile.d/conda.sh
-conda activate /project/jnovembre/afselim/pca_rmt
+{conda_activate}
 python src/sweeps_analysis/precompute_coal_times.py \
     --simdir {simdir} --aggregate

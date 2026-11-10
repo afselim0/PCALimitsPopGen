@@ -1,4 +1,4 @@
-# SLURM settings used by every sbatch script this repository renders or submits.
+# Cluster settings used by every sbatch script this repository renders or submits.
 #
 # >>> CHANGE THESE to match your own cluster before regenerating results. <<<
 # The defaults below are for the Novembre lab on UChicago's Midway cluster and will not
@@ -7,3 +7,8 @@
 
 account: pi-jnovembre
 partition: jnovembre
+
+# How a batch job activates the conda environment built from environment.yml:
+# conda_sh is your conda installation's etc/profile.d/conda.sh, conda_env the env's name or path.
+conda_sh: /software/bin/miniconda3/etc/profile.d/conda.sh
+conda_env: /project/jnovembre/afselim/pca_rmt

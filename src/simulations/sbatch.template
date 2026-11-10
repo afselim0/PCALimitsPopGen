@@ -12,8 +12,7 @@
 # Auto-generated from {config_path} by sbatch.py -- do not hand-edit the --array bound,
 # regenerate instead if the config's sweep size changes.
 mkdir -p logs
-source /software/bin/miniconda3/etc/profile.d/conda.sh
-conda activate /project/jnovembre/afselim/pca_rmt
+{conda_activate}
 python src/simulations/run_simulation.py {config_path} \
     --n-workers "${{SLURM_CPUS_PER_TASK}}" \
     --task-index "${{SLURM_ARRAY_TASK_ID}}" \

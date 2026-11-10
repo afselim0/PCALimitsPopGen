@@ -21,6 +21,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import yaml
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch
 
@@ -53,23 +54,12 @@ THEORY_P2_KW = dict(color="black", linewidth=1.0, linestyle=(0, (4, 2)), zorder=
 BAND_KW = dict(alpha=0.22, linewidth=0, zorder=2)
 
 
-def split_time(summary_dir=SUMMARY_DIR, default=500.0):
-    """The simulations' t_split (shared by both sweeps), read from the replicate tables."""
-    found = {}
-    for sweep in ("split_ss_vary_N", "split_ss_vary_phi"):
-        path = os.path.join(_PROJECT_ROOT, "results", "sweeps", sweep, "replicates.csv")
-        try:
-            col = pd.read_csv(path, usecols=["t_split"])["t_split"]
-        except (FileNotFoundError, ValueError):
-            continue
-        vals = col.unique()
-        if len(vals):
-            found[sweep] = float(vals[0])
-    if not found:
-        return default
-    if len(set(found.values())) > 1:
-        raise ValueError(f"split_stepping_stone sweeps disagree on t_split: {found}")
-    return next(iter(found.values()))
+def split_time():
+    """The simulations' t_split, from the simulation config."""
+    path = os.path.join(_PROJECT_ROOT, "src", "simulations", "configs",
+                        "split_stepping_stone.yaml")
+    with open(path) as f:
+        return float(yaml.safe_load(f)["fixed"]["t_split"])
 
 
 def load_spectrum(spectrum_dir=None):
@@ -319,7 +309,7 @@ def key_handles(t_split):
 def make_figure(summary_dir=SUMMARY_DIR):
     gs.setup()
     curves, crossings, points, _ = load_summary(summary_dir, with_theory=False)
-    t_split = split_time(summary_dir)
+    t_split = split_time()
     spec, gaps = load_spectrum()
     part, _, per_rank_rep = load_participation()
     K = int(pd.read_csv(os.path.join(DEMO_DIR, "pc.csv"), usecols=["deme_row"]).deme_row.max() + 1)

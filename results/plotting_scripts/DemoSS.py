@@ -1,17 +1,17 @@
 #%%
 """
-Figure 4 (double column): sample PCs in the stepping-stone models at three regimes.
+Figure 4 (single column): sample PCs in the stepping-stone models at three regimes.
 
-a  1D (K = 25 demes): the chain coloured by deme, then PC1 (with vertical jitter that
-   carries no information) at no, weak and strong structure.
-b  2D (9 x 9 demes): the grid coloured by position, then PC1 vs PC2 (Procrustes-aligned
+a  1D (K = 25 demes): title and the chain coloured by deme, centred above PC1 (with vertical jitter that
+   carries no information) at no, weak and strong structure (left to right).
+b  2D (9 x 9 demes): title and the grid coloured by position, centred above PC1 vs PC2 (Procrustes-aligned
    to the degenerate closed-form pair in the analysis script) at the same three regimes.
 
 Regimes are chosen in the analysis script by the measured <u_hat, u>^2; each PC panel is
 annotated with its M and that value.
 
 Reads results/analysis/SteppingStoneEigenvectorShapes
-Writes results/figures/main/DemoSS.pdf
+Writes results/figures/main/DemoSS.pdf (single column)
 """
 import os
 
@@ -30,13 +30,15 @@ COLOR_EDGE = "0.2"
 JITTER_1D = 0.16
 MARKER_S = 2.0
 
-# Layout (mm)
-W, H = gs.WIDTH["double"] / gs.MM, 72.0
-PC_X = [56.0, 101.5, 147.0]
-PC_W = 35.0
-ROW_B = (8.0, 35.0)       # bottom, height of the 2D row (square panels)
-ROW_A = (56.5, 8.5)       # bottom, height of the 1D strips
-SCHEMATIC_X, SCHEMATIC_W = 4.0, 38.0
+# Layout (mm), per block top to bottom: title, schematic, three PC panels
+W = gs.WIDTH["single"] / gs.MM
+PC_X0, PC_W, PC_GAP = 9.5, 21.0, 7.3      # three PC columns
+STRIP_H, SQUARE = 7.0, 22.0
+ANNOT_H, XAXIS_H = 6.0, 6.5               # two-line annotation above, ticks + label below
+CHAIN_H, CHAIN_W, GRID = 5.0, 48.0, 15.0  # schematic sizes
+TITLE_H = 3.6                             # title row, its baseline level with the letter
+H = (TITLE_H + CHAIN_H + ANNOT_H + STRIP_H + XAXIS_H + 2.5
+     + TITLE_H + GRID + ANNOT_H + SQUARE + XAXIS_H)
 
 
 def fmt_M(v):
@@ -54,9 +56,11 @@ def blank(ax):
         s.set_visible(False)
 
 
-def annotate(ax, row):
-    ax.text(0.5, 1.0, rf"$M = {fmt_M(row.M)}$,  $\langle\hat u,u\rangle^2 = {row.median_cos:.2f}$",
-            transform=ax.transAxes, ha="center", va="bottom", fontsize=gs.LABEL_PT)
+def annotate(ax, row, height_mm):
+    ax.text(0.5, 1 + 0.6 / height_mm,
+            rf"$M = {fmt_M(row.M)}$" "\n" rf"$\langle\hat u,u\rangle^2 = {row.median_cos:.2f}$",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=gs.TICK_PT,
+            linespacing=1.1)
 
 
 def schematic_1d(ax, K, n):
@@ -118,31 +122,39 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
     n1, n2 = (int(meta.loc[(k, REGIMES[0])].n_per_deme) for k in (1, 2))
 
     fig = gs.blank_figure(W, H)
+    pc_x = [PC_X0 + i * (PC_W + PC_GAP) for i in range(3)]
+    cx = (pc_x[0] + pc_x[-1] + PC_W) / 2      # centre of the three-panel row
 
-    # a: 1D row
-    ax = gs.axes_mm(fig, SCHEMATIC_X, ROW_A[0] + 1.0, SCHEMATIC_W, ROW_A[1])
-    schematic_1d(ax, K1, n1)
-    ax.text(0.5, -0.15, f"1D stepping stones\n$K = {K1}$ demes, $n = {n1}$ per deme",
-            transform=ax.transAxes, ha="center", va="top", fontsize=gs.LABEL_PT)
-    for x, regime in zip(PC_X, REGIMES):
-        ax = gs.axes_mm(fig, x, ROW_A[0], PC_W, ROW_A[1])
+    def title(letter, top, text):
+        # letter at the block's top-left; title centred, on the letter's baseline
+        gs.label_panel_mm(fig, letter, 0.3, top)
+        fig.text(cx / W, (top - 2.4) / H, text, ha="center", va="baseline",
+                 fontsize=gs.LABEL_PT)
+
+    # a: title, 1D chain, then the three PC1 strips
+    top = H
+    title("a", top, rf"1D stepping stones, $K = {K1}$ demes, $n = {n1}$ per deme")
+    y = top - TITLE_H - CHAIN_H
+    schematic_1d(gs.axes_mm(fig, cx - CHAIN_W / 2, y, CHAIN_W, CHAIN_H), K1, n1)
+    y -= ANNOT_H + STRIP_H
+    for x, regime in zip(pc_x, REGIMES):
+        ax = gs.axes_mm(fig, x, y, PC_W, STRIP_H)
         panel_1d(ax, pcs[(pcs.dimension == 1) & (pcs.regime == regime)], K1, rng)
-        annotate(ax, meta.loc[(1, regime)])
+        annotate(ax, meta.loc[(1, regime)], STRIP_H)
 
-    # b: 2D row
-    side = 27.0
-    ax = gs.axes_mm(fig, SCHEMATIC_X + (SCHEMATIC_W - side) / 2,
-                    ROW_B[0] + ROW_B[1] - side, side, side)
-    schematic_2d(ax, K2)
-    ax.text(0.5, -0.04, f"2D stepping stones\n${K2}\\times{K2}$ demes, $n = {n2}$ per deme",
-            transform=ax.transAxes, ha="center", va="top", fontsize=gs.LABEL_PT)
-    for x, regime in zip(PC_X, REGIMES):
-        ax = gs.axes_mm(fig, x, ROW_B[0], PC_W, ROW_B[1])
+    # b: title, 2D grid, then the three PC1-vs-PC2 squares
+    top = y - XAXIS_H - 2.5
+    title("b", top, rf"2D stepping stones, ${K2}\times{K2}$ demes, $n = {n2}$ per deme")
+    y = top - TITLE_H - GRID
+    schematic_2d(gs.axes_mm(fig, cx - GRID / 2, y, GRID, GRID), K2)
+    y -= ANNOT_H + SQUARE
+    for i, (x, regime) in enumerate(zip(pc_x, REGIMES)):
+        ax = gs.axes_mm(fig, x, y, PC_W, SQUARE)
         panel_2d(ax, pcs[(pcs.dimension == 2) & (pcs.regime == regime)], K2)
-        annotate(ax, meta.loc[(2, regime)])
+        annotate(ax, meta.loc[(2, regime)], SQUARE)
+        if i:
+            ax.set_ylabel("")
 
-    gs.label_panel_mm(fig, "a", 1.0, H - 0.5)
-    gs.label_panel_mm(fig, "b", 1.0, ROW_B[0] + ROW_B[1] + 5.0)
     out = gs.save(fig, "DemoSS", "main")
     print(f"wrote {out}")
     return fig

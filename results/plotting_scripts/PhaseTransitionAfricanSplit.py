@@ -25,7 +25,7 @@ import stdpopsim
 
 import genetics_style as gs
 from crossing_panel import crossing_table, load_summary
-from sweep_figure import LEFT, RIGHT, draw_pair, pair_height
+from sweep_figure import GAP, LEFT, RIGHT, draw_pair, pair_height
 
 ANALYSIS_DIR = os.path.join(gs._ROOT, "results", "analysis", "OOA3Demography")
 SUMMARY_DIR = os.path.join(gs._ROOT, "results", "sweep_summaries", "african_split")
@@ -134,9 +134,10 @@ def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR):
     H = TOP_H + pair_height(6, WIDTH, AX_H)
     fig = gs.blank_figure(WIDTH, H)
 
-    # Top row: demography (a) beside two stacked PC strips (b, c), letters on one line
-    dem_w, strip_x = 30.0, LEFT + 30.0 + 7.0
-    strip_w = WIDTH - strip_x - RIGHT
+    # Top row: demography (a) beside two stacked PC strips (b, c). The strips share panel
+    # e's column (same left edge and width), so the letters b, c and e line up.
+    strip_w = (WIDTH - LEFT - GAP - RIGHT) / 2
+    dem_w, strip_x = 30.0, LEFT + strip_w + GAP
     strip_tops = (H - 4.0, H - 21.0)
     ax_dem = gs.axes_mm(fig, LEFT, strip_tops[1] - STRIP_H, dem_w,
                         H - 3.0 - (strip_tops[1] - STRIP_H))
@@ -146,7 +147,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR):
     for i, (phi, top) in enumerate(zip(sorted(pc1.phi.unique()), strip_tops)):
         ax = gs.axes_mm(fig, strip_x, top - STRIP_H, strip_w, STRIP_H)
         rank = panel_pc(ax, pc1[(pc1.label == LABEL) & (pc1.phi == phi)])
-        gs.label_panel_mm(fig, "bc"[i], strip_x - 5.5, top + 4.0)
+        gs.label_panel_mm(fig, "bc"[i], strip_x - GAP + 0.3, top + 4.0)  # as in draw_pair
     ax.set_xlabel(f"PC{rank + 1} (YRI1/YRI2 axis)")
 
     panels = [dict(curves=curves, crossings=crossings, points=points, theory=theory,

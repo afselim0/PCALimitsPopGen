@@ -29,7 +29,7 @@ Outputs (results/analysis/RecentSpatialDemography):
                t_split (split time in generations, used by the schematic panel),
                cos (mean principal cosine between the PC2/PC3 pair and the
                theoretical spatial pair -- the same subspace-overlap convention the
-               RecentSpatialOverlapVsM sweep reports)
+               split_stepping_stone sweeps report)
 """
 import argparse
 import os

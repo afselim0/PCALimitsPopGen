@@ -1,5 +1,4 @@
 # OOA3 sister pair: PC3 alignment vs Fst, varying total N at fixed sister fraction.
-# Matches src/analysis/SisterPCAlignment.py's vary_N sweep (phi_1 = phi_2 = 0.05).
 #
 # The expensive config: prepare() runs pop_coal_times, an msprime numerical integration
 # per population pair, ~15-20 min for this task's t_split. That is paid once per array

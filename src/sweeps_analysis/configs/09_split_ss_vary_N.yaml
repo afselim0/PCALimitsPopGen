@@ -1,6 +1,5 @@
 # Recent spatial structure (panmictic A + a K x K grid B): spatial-axis recovery vs 1/M,
 # varying n-per-deme-B at a fixed 50/50 split between the structured and panmictic halves.
-# Matches src/analysis/RecentSpatialOverlapVsM.py's vary_n sweep.
 model: split_stepping_stone
 name: split_ss_vary_N
 simdir: results/simulations/split_stepping_stone/K9

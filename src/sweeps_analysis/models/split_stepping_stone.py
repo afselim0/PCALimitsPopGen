@@ -76,7 +76,7 @@ def spatial_axis(K, m, t_split, Ne_ancestral, n_per_deme_B, n_A):
     """
     The theoretical (1,0)/(0,1) spatial pair, lifted to full [A, B_00, ...] sample space:
     zero on A's block (A carries none of the spatial signal), the population-space pair
-    spread per-deme on B's block. Ported from src/analysis/RecentSpatialOverlapVsM.
+    spread per-deme on B's block.
 
     The pair is the equilibrium 2D stepping-stone one; only nu stays on the transient
     phase-type solve. See split_stepping_stone_theory.equilibrium_B_axes.

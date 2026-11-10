@@ -5,7 +5,7 @@ against Fst.
 The expensive model. prepare() runs pop_coal_times -- an msprime numerical integration per
 population pair, ~15-20 min for one t_split. That cost is why the array axis is the
 simulation file: one task pays it once for its own t_split, with no shared cache to race
-on, exactly as src/analysis/SisterPCAlignment.py's job array already does.
+on.
 
 Policies (see models/__init__.py for why these are explicit rather than defaulted):
     axis location   fixed rank SISTER_RANK = 2 (PC3), NOT an overlap search. The deep OOA

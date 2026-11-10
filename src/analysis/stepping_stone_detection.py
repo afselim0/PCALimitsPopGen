@@ -23,7 +23,6 @@ out of the same runs.
 Outputs (results/analysis/stepping_stone_detection):
     detection.csv   one row per (simulation, n, L) cell, long format
 """
-import argparse
 import os
 import sys
 
@@ -185,28 +184,5 @@ def run(dimension, K_values=None, simulation_root=None, n_values=DEFAULT_N_VALUE
     if verbose:
         print(f"wrote {len(out)} rows -> {path}")
     return out
-
-
-def main():
-    p = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dimension", type=int, choices=(1, 2), default=1, help="1D chain or 2D grid (default: 1)")
-    p.add_argument("--K", type=int, nargs="+", default=None, help="restrict to these K cells (default: every K* directory found)")
-    p.add_argument("--simulation-root", default=None, help="directory of K* simulation cells (default: results/simulations/SS_<dim>D)")
-    p.add_argument("--n", type=int, nargs="+", default=DEFAULT_N_VALUES, dest="n_values", help=f"per-deme sample sizes to subsample to, giving the N sweep (default: {DEFAULT_N_VALUES})")
-    p.add_argument("--L", type=int, default=None, help="SNP columns per replicate; default keeps each simulation's full L")
-    p.add_argument("--num-replicates", type=int, default=DEFAULT_NUM_REPLICATES)
-    p.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    p.add_argument("--outdir", default=None)
-    args = p.parse_args()
-
-    run(args.dimension, K_values=args.K, simulation_root=args.simulation_root,
-        n_values=args.n_values, L=args.L, num_replicates=args.num_replicates,
-        seed=args.seed, outdir=args.outdir)
-
-
-if __name__ == "__main__":
-    main()
 
 # %%

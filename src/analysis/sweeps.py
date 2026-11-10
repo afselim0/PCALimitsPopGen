@@ -29,7 +29,6 @@ Outputs (results/analysis/<name>), for a sweep written as sweep.csv:
     sweep_crossings.csv    one row per cell: the swept value at which the measured overlap
                            crosses the target, beside the value at which theory does
 """
-import argparse
 import os
 import sys
 
@@ -179,30 +178,5 @@ def sweep_L(simdir, T_from_params, L_values, n, indices, name, **kw):
     outdir = kw.get("outdir") or os.path.join(ANALYSIS_ROOT, name)
     df.to_csv(os.path.join(outdir, filename), index=False)
     return df
-
-
-def main():
-    p = argparse.ArgumentParser(
-        description="PC recovery sweep over the two-population split simulations.",
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--simdir", default=os.path.join(SIMULATION_ROOT, "split"))
-    p.add_argument("--name", default="PCRecoverySplit")
-    p.add_argument("--sweep", choices=("N", "ratios"), default="N")
-    p.add_argument("--num-replicates", type=int, default=DEFAULT_NUM_REPLICATES)
-    p.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    args = p.parse_args()
-
-    T_from = lambda row: split_T(row["Fst"])
-    if args.sweep == "N":
-        sweep_N(args.simdir, T_from, [50, 100, 200, 400, 800], indices=[0],
-                name=args.name, num_replicates=args.num_replicates, seed=args.seed)
-    else:
-        sweep_ratios(args.simdir, T_from, 400,
-                     [(1, 9), (1, 4), (1, 2), (2, 3), (1, 1)], indices=[0],
-                     name=args.name, num_replicates=args.num_replicates, seed=args.seed)
-
-
-if __name__ == "__main__":
-    main()
 
 # %%

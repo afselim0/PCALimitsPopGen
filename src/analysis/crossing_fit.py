@@ -48,8 +48,8 @@ Richards curves, the crossing CI the same percentiles of the refitted monotone c
 The theoretical counterpart is `theory_crossing`, which numerically inverts the exact
 Ding & Yang overlap from src/threshold_and_overlap rather than assuming a functional form.
 
-Used by the overlap-vs-parameter analyses (SingleSplitSweeps, SisterPCAlignment,
-SteppingStone*, RecentSpatial*) and their plotting scripts.
+Used by the overlap-vs-parameter analyses (SingleSplitSweeps, SteppingStone*) and the
+sweep summaries and their plotting scripts.
 """
 import numpy as np
 from scipy.interpolate import PchipInterpolator

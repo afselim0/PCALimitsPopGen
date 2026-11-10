@@ -347,7 +347,7 @@ def eigenvectors_by_overlap(Z, V_theory, standardize=False,
     and asking for rank 0 returns a near-orthogonal vector (overlap 2e-4 against 0.97).
     Use this only when the axis's rank genuinely isn't known ahead of time -- if it is
     (e.g. deterministically rank 2, as measured for the OOA3 sister axis in
-    SisterEigenvalue.py/SisterPCAlignment.py), read that rank directly via
+    SisterEigenvalue.py), read that rank directly via
     sample_eigenvectors instead: searching the full spectrum for a known-fixed rank only
     inflates the no-signal baseline (see support_overlap_floor) without changing which
     eigenvector gets picked.

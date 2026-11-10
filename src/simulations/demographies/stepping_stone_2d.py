@@ -13,7 +13,7 @@ K, Ne and L are fixed parameters (fixed.K, fixed.Ne, fixed.L). The swept paramet
 rate through M = 4 Ne m -- see stepping_stone_grid.inverse_M_grid.
 
 The leading eigenvalue is doubly degenerate here (mu_10 = mu_01) -- the recoverable
-object is a 2D subspace, not a single PC. See src/analysis/SteppingStoneDetection.py.
+object is a 2D subspace, not a single PC.
 
 Output directory: K<K>, with its own simulation_parameters.csv and invM<value>.npy.
 """

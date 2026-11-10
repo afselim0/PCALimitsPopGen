@@ -60,8 +60,7 @@ blocks 2 and 3.
 nu_exact is also computed per cell (exact_sister_nu.exact_sister_nu, from the full 4x4
 coalescent-time matrix, not the eps_a=0 approximation), so nu_meas can be checked against
 both the exact theoretical eigenvalue and the N*H*Fst approximation separately -- the first
-tests whether measurement recovers theory, the second tests what the approximation costs
-(see SisterApproximation.py for that comparison in isolation, theory vs theory).
+tests whether measurement recovers theory, the second tests what the approximation costs.
 
 Outputs (results/analysis/SisterEigenvalue):
     cells.csv    one row per (simulation, design, replicate)

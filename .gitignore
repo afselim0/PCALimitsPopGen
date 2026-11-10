@@ -1,3 +1,4 @@
+.misc/
 misc/
 CLAUDE.md
 results/simulations
@@ -12,8 +13,6 @@ logs/
 results/sweeps/
 results/sweep_summaries/
 slurm_runs/sweeps/
-.csv
-.npz
 .claude
 results/presentation_figs/
 results/plotting_scripts/presentation/

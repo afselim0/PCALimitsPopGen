@@ -16,7 +16,7 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 import genetics_style as gs
-from genetics_style import grid_color  # re-exported: DemoStrideSS imports it from here
+from genetics_style import grid_color
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(_ROOT, "results", "analysis", "RecentSpatialDemography")

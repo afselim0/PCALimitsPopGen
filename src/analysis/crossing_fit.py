@@ -451,7 +451,8 @@ def _safe(fn, x):
 # --- writing per-replicate rows ------------------------------------------
 
 def replicate_rows(base, x_value, x_name, cos_per_replicate, seed=None,
-                   cos_std_per_replicate=None, per_replicate_cols=None):
+                   cos_std_per_replicate=None, per_replicate_cols=None,
+                   already_squared=False):
     """
     Expand one sweep cell into one tidy row per replicate.
 
@@ -477,17 +478,31 @@ def replicate_rows(base, x_value, x_name, cos_per_replicate, seed=None,
     """
     rows = []
     ana = base.get("analytical_cos")
+    # The analytical prediction is a single-axis overlap either way, so it is squared here
+    # regardless of how the MEASUREMENT was reduced.
     cos_std = (np.atleast_1d(cos_std_per_replicate)
                if cos_std_per_replicate is not None else None)
     for rep, c in enumerate(np.atleast_1d(cos_per_replicate)):
         row = dict(base)
         row[x_name] = float(x_value)
         row["replicate"] = int(rep)
-        row["cos"] = float(c)
-        row["cos2"] = float(c) ** 2
+        # already_squared: the caller reduced its k principal cosines as mean(c^2), so the
+        # value handed in IS cos2 and squaring it again would give mean(c^2)^2. Only the
+        # multi-axis deme-fraction sweeps set it; with one axis the two reductions differ
+        # only by this square, which is exactly what the default does.
+        if already_squared:
+            row["cos2"] = float(c)
+            row["cos"] = float(np.sqrt(max(float(c), 0.0)))
+        else:
+            row["cos"] = float(c)
+            row["cos2"] = float(c) ** 2
         if cos_std is not None and rep < len(cos_std):
-            row["cos_std"] = float(cos_std[rep])
-            row["cos2_std"] = float(cos_std[rep]) ** 2
+            if already_squared:
+                row["cos2_std"] = float(cos_std[rep])
+                row["cos_std"] = float(np.sqrt(max(float(cos_std[rep]), 0.0)))
+            else:
+                row["cos_std"] = float(cos_std[rep])
+                row["cos2_std"] = float(cos_std[rep]) ** 2
         if ana is not None and np.isfinite(ana):
             row["analytical_cos2"] = float(ana) ** 2
         if per_replicate_cols:

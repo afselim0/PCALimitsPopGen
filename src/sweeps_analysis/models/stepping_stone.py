@@ -357,10 +357,22 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
         if rep == 0:
             h_rep0 = locus_weights(sub)
 
+    # Reduce the k principal cosines to one number per replicate. `squared_cosine` in the
+    # config selects mean(c^2) instead of the default mean(c): the reported column is named
+    # cos2 and the figures label it <u_hat, u>^2, and only mean(c^2) is that quantity.
+    # It is opt-in rather than the default because the other sweeps' stored summaries and
+    # crossing numbers were all fitted on mean(c), and switching them silently would make
+    # the manuscript's numbers inconsistent with its files. Configs 06 and 08 set it so the
+    # measured curve is on the same footing as the realizable ceiling it is compared with
+    # (src/analysis/SparseSamplingCeiling.py), which has always used mean(c^2); configs 07
+    # and 12 set it because k_lead = 2 there, where mean(c)^2 < mean(c^2) by Jensen.
+    squared = bool(cfg.get("squared_cosine", False))
+    reduce_cos = (lambda c: (c ** 2).mean(axis=1)) if squared else (lambda c: c.mean(axis=1))
+
     cos_all = np.array(cos_all)
-    mean_cos = cos_all.mean(axis=1)
+    mean_cos = reduce_cos(cos_all)
     cos_all_std = np.array(cos_all_std)
-    mean_cos_std = cos_all_std.mean(axis=1)
+    mean_cos_std = reduce_cos(cos_all_std)
     # One nu per replicate: the degenerate pair is averaged the way the measurement
     # averages its two axes, so nu and cos describe the same subspace.
     nu_per_replicate = np.array([float(np.mean(v)) for v in nu_reps])

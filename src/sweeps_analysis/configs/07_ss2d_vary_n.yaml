@@ -10,6 +10,12 @@ simdir: results/simulations/stepping_stone_2d/K9
 n_replicates: 8
 seed: 0
 
+# k_lead = 2 here, so the two reductions of the principal cosines genuinely differ:
+# mean(c^2) is the <u_hat, u>^2 the figures label, mean(c)^2 is not (Jensen makes the
+# latter smaller whenever the two axes are recovered unequally). Set for the same reason
+# as in configs 06 and 08.
+squared_cosine: true
+
 fixed:
   dimension: 2
   L: 10000

@@ -43,7 +43,8 @@ def _measure(model, ctx, design, sim_row, cfg, Z, spec, n_replicates, seed):
         nu=spec.get("nu"), eps=spec.get("eps"),
         select_by_overlap=spec.get("select_by_overlap", False),
         n_available=spec.get("n_available"),
-        L_polymorphic=cfg["fixed"].get("L_polymorphic", False))
+        L_polymorphic=cfg["fixed"].get("L_polymorphic", False),
+        squared_cosine=bool(cfg.get("squared_cosine", False)))
 
 
 def run_one_task(index, cfg, outdir, verbose=True, force=False):
@@ -142,9 +143,12 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
             if res.get(key) is not None:
                 per_rep[col] = res[key]
         per_rep = per_rep or None
+        # squared_cosine configs already reduced their k principal cosines as mean(c^2),
+        # so cos_replicates IS cos2 and replicate_rows must not square it a second time.
         reps = replicate_rows(base, row["x"], "x", res["cos_replicates"], seed=seed,
                               cos_std_per_replicate=res.get("cos_replicates_std"),
-                              per_replicate_cols=per_rep)
+                              per_replicate_cols=per_rep,
+                              already_squared=bool(cfg.get("squared_cosine", False)))
         for r in reps:
             r[model.X_KEY] = r["x"]
         rep_rows.extend(reps)

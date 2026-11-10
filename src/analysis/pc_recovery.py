@@ -533,7 +533,8 @@ def _median_se(x):
 
 
 def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=None, eps=None,
-                select_by_overlap=False, n_available=None, L_polymorphic=False):
+                select_by_overlap=False, n_available=None, L_polymorphic=False,
+                squared_cosine=False):
     """
     How well the sample PCs at `indices` recover the theoretical axes V_theory.
 
@@ -564,6 +565,11 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         n_available: per-subpopulation block sizes actually present in Z, length K. None
             assumes every block has the same size (see subsample()); pass this for
             demographies with unequal per-subpopulation sample sizes.
+        squared_cosine: reduce the k principal cosines as mean(c^2) rather than mean(c).
+            Only mean(c^2) is the <u_hat, u>^2 the figures label, and the two differ
+            whenever k > 1; with k = 1 they differ only by a square, which the caller
+            applies anyway. Mirrors the flag of the same name in
+            models/stepping_stone.cell_replicates -- keep the two in step.
 
     Returns:
         dict with, for the subspace as a whole, median_cos / se_cos and the matching
@@ -628,10 +634,13 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
             # them would be num_replicates x L floats per cell.
             h_rep0 = locus_weights(sub)
 
+    # Reduce the k principal cosines to one number per replicate. See `squared_cosine`.
+    reduce_cos = ((lambda c: (c ** 2).mean(axis=1)) if squared_cosine
+                  else (lambda c: c.mean(axis=1)))
     cos_all = np.array(cos_all)                 # (num_replicates, k)
-    mean_cos = cos_all.mean(axis=1)             # subspace similarity per replicate
+    mean_cos = reduce_cos(cos_all)              # subspace similarity per replicate
     cos_all_std = np.array(cos_all_std)
-    mean_cos_std = cos_all_std.mean(axis=1)
+    mean_cos_std = reduce_cos(cos_all_std)
     # The structure eigenvalue actually measured, and the top of the bulk it must clear.
     # Averaged over the axes of the subspace, matching how the cosine is reduced, so that a
     # degenerate pair contributes one number rather than an arbitrary split.

@@ -31,7 +31,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStoneEvenSampling")
 FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
-NU1_LABEL = r'$\nu_1 = N / (M K \sin^2(\pi / 2K))$'
+NU1_LABEL = r'$\nu_1 = \dfrac{n}{4M\sin^2(\pi/2K)}$'
 NUM_M_LEVELS = 5
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X']
 N_PER_DEME = [2, 4, 8, 16, 32]

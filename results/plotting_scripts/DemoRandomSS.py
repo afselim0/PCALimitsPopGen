@@ -12,10 +12,12 @@ Columns are the three sampling fractions phi in [0.2, 0.4, 0.6]; rows are
            colored by chain position (viridis), sampled demes at full alpha and unsampled
            faded
     row 2  1D PC1 for that scheme, colored the same way, titled with its cosine
-           similarity to the closed-form spatial axis
+           similarity <u_hat_phi, u_1>^2 to the closed-form spatial axis -- the PC is the
+           sparse sample's at that phi, the axis is always the FULL-lattice one
     row 3  the 2D sampling scheme: a K x K grid, colored by grid position
     row 4  2D PC1 vs PC2 for that scheme, on a square panel, titled with the mean
-           principal cosine to the closed-form degenerate pair
+           principal cosine <u_hat_phi, u_1>^2 to the closed-form degenerate pair, the
+           same convention as row 2
 
 Colors: 1D uses viridis along the chain; 2D uses the bivariate (row, col) colormap shared
 with DemoSS and DemoRecentSS, so grid position maps to
@@ -203,8 +205,14 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
 
         # How well the PC panel below each scheme actually recovers the spatial axis,
         # stated on the panel itself so the reader need not consult figure 10.
-        axes[1, j].set_title(rf"$\langle\hat u,u\rangle^2 = {p1['cos'].iloc[0]:.2f}$")
-        axes[3, j].set_title(rf"$\langle\hat u,u\rangle^2 = {p2['cos'].iloc[0]:.2f}$")
+        # Name BOTH vectors, with this column's own phi substituted in: the PC comes from
+        # the sparse sample at that phi, while the axis it is compared against is always the
+        # FULL-lattice u_1. A generic <u_hat, u>^2 hides exactly the asymmetry these three
+        # columns exist to show.
+        axes[1, j].set_title(
+            rf"$\langle\hat u_{{{phi:g}}}, u_1\rangle^2 = {p1['cos'].iloc[0]:.2f}$")
+        axes[3, j].set_title(
+            rf"$\langle\hat u_{{{phi:g}}}, u_1\rangle^2 = {p2['cos'].iloc[0]:.2f}$")
 
         # Each section gets its own column titles: the two geometries have different deme
         # counts, so the same phi means a different number of sampled demes in each.

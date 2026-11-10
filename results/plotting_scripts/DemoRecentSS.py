@@ -230,8 +230,13 @@ def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
         cos = float(meta.loc[label, "cos"])
         d = pc[pc.label == label]
         ax_pc = fig.add_subplot(gs[0, j])
+        # Name both vectors: the OBSERVED axis of a grid sampled t_split generations after
+        # the split, against the EQUILIBRIUM stepping-stone axis that stands in for
+        # geographic position. The generic <u_hat, u>^2 left it ambiguous which pair of
+        # vectors this panel's number refers to. t_split comes from the data, not a literal.
         panel_pc(ax_pc, d, K,
-                 rf"$M={M:.2g}$" "\n" rf"$\langle\hat u,u\rangle^2 = {cos:.2f}$")
+                 rf"$M={M:.2g}$" "\n"
+                 rf"$\langle\hat u_{{t={t_split:g}}}, u_\infty\rangle^2 = {cos:.2f}$")
         ax_pc.set_box_aspect(1.0)      # PC2 and PC3 span a degenerate pair: equal scales
         letter_axes.append(ax_pc)
 

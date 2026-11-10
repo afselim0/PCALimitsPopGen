@@ -60,6 +60,75 @@ def num_demes(K, dimension=1):
     return K if dimension == 1 else K * K
 
 
+def _migration_adjacency(K, dimension=1):
+    """Unweighted nearest-neighbour adjacency of the habitat: a chain or a grid."""
+    K_demes = num_demes(K, dimension)
+    A = np.zeros((K_demes, K_demes))
+    if dimension == 1:
+        for i in range(K_demes - 1):
+            A[i, i + 1] = A[i + 1, i] = 1.0
+        return A
+    if dimension == 2:
+        for row in range(K):
+            for col in range(K):
+                i = row * K + col
+                if col + 1 < K:
+                    j = row * K + col + 1
+                    A[i, j] = A[j, i] = 1.0
+                if row + 1 < K:
+                    j = (row + 1) * K + col
+                    A[i, j] = A[j, i] = 1.0
+        return A
+    raise ValueError(f"dimension must be 1 or 2, got {dimension}")
+
+
+@lru_cache(maxsize=None)
+def resistance_distance(K, dimension=1):
+    """
+    R_ij = L+_ii + L+_jj - 2 L+_ij for the habitat's mbar-scaled Laplacian.
+
+    The Laplacian is scaled by mbar, so R here is the mbar*R^(m) of the model's definition
+    and carries no migration rate: m enters F_hat only through M (see f_hat_from_resistance).
+    That is what makes R a property of the HABITAT alone, cacheable once per (K, dimension)
+    and reused across an entire M sweep -- the 2D pseudo-inverse costs ~2 s and would
+    otherwise be repaid at every grid point.
+
+    Under uniform nearest-neighbour migration every non-zero m_ij is mbar, so the scaled
+    Laplacian is exactly the unweighted graph Laplacian.
+    """
+    Lap = np.diag(_migration_adjacency(K, dimension).sum(axis=1)) \
+        - _migration_adjacency(K, dimension)
+    Lap_plus = np.linalg.pinv(Lap)
+    d = np.diag(Lap_plus)
+    return d[:, None] + d[None, :] - 2 * Lap_plus
+
+
+def f_hat_from_resistance(R, n, M):
+    """
+    F_hat = -(N / 2M) P_hat D_psi R D_psi P_hat -- F_hat straight from the resistance
+    distance, with no coalescent time matrix in between.
+
+    Equivalent to compute_F_hat(T, n) on the T that stepping_stone_T builds from the same R
+    (verified to ~1e-14 on both lattices, sparse and full sampling, across M), but it skips
+    building T and makes the 1/M dependence explicit: F_hat is exactly proportional to 1/M,
+    so its eigenVECTORS do not move with M at all and its eigenvalues simply rescale.
+
+    Args:
+        R: (k, k) resistance distance, already restricted to the sampled demes.
+        n: per-deme sample sizes over those same demes.
+        M: 4 * Ne * mbar.
+
+    Returns:
+        (k, k) F_hat, whose non-trivial eigenvalues are the structure eigenvalues.
+    """
+    n = np.asarray(n, dtype=float)
+    N = n.sum()
+    psi = np.sqrt(n / N)
+    P_hat = np.eye(len(n)) - np.outer(psi, psi)
+    D_psi = np.diag(psi)
+    return -(N / (2.0 * M)) * P_hat @ D_psi @ np.asarray(R, dtype=float) @ D_psi @ P_hat
+
+
 def structure_eigenvalues(K, M, n_per_deme, dimension=1):
     """
     The K_demes - 1 structure eigenvalues nu_k = N / (M K_demes mu_k), descending.

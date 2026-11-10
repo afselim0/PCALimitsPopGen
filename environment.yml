@@ -4,14 +4,20 @@ channels:
   - bioconda
 dependencies:
   - python=3.12
-  - numpy
-  - scipy
-  - pandas
-  - matplotlib
+  - numpy=2.5
+  - scipy=1.18
+  - pandas=3.0
+  - matplotlib=3.11
   - pyyaml
   - tqdm
-  - msprime
-  - stdpopsim
+  - msprime=1.4
+  - stdpopsim=0.3
+  - demes=0.2
+  # R is only used to fit the recent-split sweeps (src/analysis/scam_fit.py)
+  - r-base=4.5
+  - r-scam
+  - r-mgcv
+  - rpy2=3.6
   - pip
   - pip:
-    - demesdraw
+    - demesdraw==0.4.1

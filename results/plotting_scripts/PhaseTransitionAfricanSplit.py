@@ -1,119 +1,165 @@
-#%%
 """
-PC alignment with the recently-split sister axis (YRI1/YRI2), as a detection threshold in Fst.
+Main Fig. 3: the YRI1/YRI2 sister split inside OOA3, and its detection threshold in Fst.
 
-A  cosine similarity vs Fst at nine sample sizes N, each sister held at 20% of N (H = 0.20).
-B  cosine similarity vs Fst at ten sister sampling designs, N = 1000 throughout. Each design
-   takes a pair (phi_1, phi_2) from {0.05, 0.10, 0.15, 0.20} -- every unordered pair,
-   phi_1 = phi_2 included -- and gives YRI1 and YRI2 those fractions of N, with CEU and CHB
-   splitting the rest. H is the harmonic mean of the two fractions, which is dominated by
-   the smaller one: (0.05, 0.20) gives H = 0.08, much closer to (0.05, 0.05)'s 0.05 than to
-   (0.20, 0.20)'s 0.20 despite four times the samples in the larger sister. That is the
-   point of the panel.
+a  demesdraw preview of OOA3 with YRI split into YRI1/YRI2 at t_split ~ 25 generations
+   (Fst(YRI1, YRI2) = 1e-3), log time axis.
+b  the sister-axis PC (selected by overlap with the predicted axis), N = 1000,
+   phi_1 = phi_2 = 0.05; YRI1/YRI2 coloured, everyone else grey, vertical jitter only.
+c  the same at phi_1 = phi_2 = 0.20.
+d  cosine similarity vs Fst at five N (harmonic mean phi~ = 0.20).
+e  cosine similarity vs Fst at six (phi_1, phi_2) designs with N = 1000, keyed by phi~.
 
-Panel A holds H at 0.20 rather than 0.05: at 0.05 the exact nu topped out at 1.67 across
-the whole simulated Fst range, so every curve plateaued near cosine similarity 0.78 and never
-reached the 0.9 target -- the sweep had no crossing to report.
-
-The fit (flat below the fitted transition, monotone increasing above), its 95% band and the theoretical
-crossing are computed upstream by src/sweeps_analysis/summarise.py and read here as
-columns; this script draws only. A filled marker sits on the curve at the target, a square on the
-x axis marks the fitted detection threshold, and dashed / dotted vertical lines mark the
-theoretical positions. The theory uses the exact
-heteroskedastic route (eps is genuinely nonzero on this demography, tau/tau_bar spans
-0.81-1.17), anchored on the exact nu recorded per cell.
-
-Reads results/sweep_summaries/african_split/{curves,crossings,points}.csv
-    (sweeps african_split_vary_N and african_split_vary_harmonic_phi)
-Writes results/figures/PhaseTransitionAfricanSplit.pdf
+Reads results/analysis/OOA3Demography/{pc1,meta}.csv and
+      results/sweep_summaries/african_split/{curves,crossings,points}.csv
+Writes results/figures/main/PhaseTransitionAfricanSplit.pdf (single column)
 """
+import copy
 import os
+import sys
 
-import matplotlib.pyplot as plt
-from matplotlib.transforms import ScaledTranslation
+import demes
+import demesdraw
+import numpy as np
 import pandas as pd
-from matplotlib import cm
+import stdpopsim
 
-from crossing_panel import (reserve_side_legend, PANEL_LETTER_SIZE, figsize, DEFAULT_TARGET, L_title, crossing_panel_from_summary,
-                            crossing_table, encoding_handles, figure_encoding_legend,
-                            encoding_bottom_margin, load_summary, save_figure,
-                            style_swept_axis, variant_note)
-from plotting_style import setup_plotting_style
+import genetics_style as gs
+from crossing_panel import crossing_table, load_summary
+from sweep_figure import LEFT, RIGHT, draw_pair, pair_height
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries", "african_split")
-FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
+ANALYSIS_DIR = os.path.join(gs._ROOT, "results", "analysis", "OOA3Demography")
+SUMMARY_DIR = os.path.join(gs._ROOT, "results", "sweep_summaries", "african_split")
+sys.path.insert(0, os.path.join(gs._ROOT, "src", "simulations"))
+from demographies.african_split import demography as ooa3_demography
 
-CMAP_N = cm.viridis
-CMAP_H = cm.plasma
-TARGET = DEFAULT_TARGET
+WIDTH, AX_H = gs.WIDTH["single"] / gs.MM, 34.0
+LABEL = "fst1e-3"                     # the marginal split shown in a-c
+TOP_H = 38.0                          # mm for the demography row
+STRIP_H = 8.0                         # mm, height of each PC strip
+COLOR_ANCESTRAL = "0.6"
+# Placement in demesdraw's x units (haploid Ne): YRI1/YRI2 adjacent, CEU/CHB outside
+DEME_POSITIONS = {"YRI": 0, "YRI1": -15000, "YRI2": 15000, "CEU": -52000, "CHB": 58000}
+DEME_COLOURS = {"YRI": COLOR_ANCESTRAL, "CEU": COLOR_ANCESTRAL, "CHB": COLOR_ANCESTRAL,
+                "YRI1": gs.POP1, "YRI2": gs.POP2}
 
 
-def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET,
-                standardized=False):
-    setup_plotting_style()
+def _preview_graph(dem, t_split):
+    """
+    demes.Graph for the preview, with YRI's tube stopping at t_split.
+
+    msprime's to_demes() clips YRI to the CEU+CHB merge (or extends it to 0), so the graph is
+    built from the 3-population OOA backbone and patched: YRI ends at t_split, and YRI1/YRI2
+    descend from it with their CEU/CHB migration rates read from `dem`.
+    """
+    species = stdpopsim.get_species("HomSap")
+    backbone = copy.deepcopy(species.get_demographic_model("OutOfAfrica_3G09").model)
+    backbone["YRI"].initially_active = True
+    d = backbone.to_demes().asdict()
+
+    yri_size = None
+    for deme in d["demes"]:
+        if deme["name"] == "YRI":
+            deme["epochs"][-1]["end_time"] = t_split
+            yri_size = deme["epochs"][-1]["end_size"]
+
+    kept = []
+    for m in d.get("migrations", []):
+        if m["source"] == "YRI" or m["dest"] == "YRI":
+            if m["start_time"] <= t_split:
+                continue
+            m = dict(m, end_time=max(m["end_time"], t_split))
+        kept.append(m)
+    d["migrations"] = kept
+
+    for name in ("YRI1", "YRI2"):
+        pid = dem[name].id
+        d["demes"].append(dict(name=name, ancestors=["YRI"], proportions=[1.0],
+                               start_time=t_split, epochs=[dict(end_time=0, end_size=yri_size)]))
+        for other in ("CEU", "CHB"):
+            oid = dem[other].id
+            d["migrations"].append(dict(source=name, dest=other, start_time=t_split, end_time=0,
+                                        rate=float(dem.migration_matrix[pid, oid])))
+            d["migrations"].append(dict(source=other, dest=name, start_time=t_split, end_time=0,
+                                        rate=float(dem.migration_matrix[oid, pid])))
+    return demes.Graph.fromdict(d)
+
+
+def panel_demography(ax, t_split):
+    graph = _preview_graph(ooa3_demography(t_split), t_split)
+    demesdraw.tubes(graph, ax=ax, log_time=True, num_lines_per_migration=2,
+                    positions=DEME_POSITIONS, colours=DEME_COLOURS, labels="xticks",
+                    fill=True)
+    # YRI is the unsampled split ancestor; its tick label only crowds YRI1/YRI2
+    ax.set_xticks([DEME_POSITIONS[p] for p in ("CEU", "YRI1", "YRI2", "CHB")])
+    ax.set_xticklabels(["CEU", "YRI1", "YRI2", "CHB"], fontsize=gs.TICK_PT)
+    ax.tick_params(axis="x", length=0, pad=1.5)
+    ax.set_ylabel("time ago (generations)")
+    for line in ax.lines:
+        line.set_linewidth(min(line.get_linewidth(), 0.8))
+    for coll in ax.collections:
+        coll.set_linewidth(0.5)
+    for patch in ax.patches:
+        patch.set_linewidth(0.6)
+        if hasattr(patch, "set_mutation_scale"):
+            patch.set_mutation_scale(5)
+
+
+def panel_pc(ax, d):
+    """Sister-axis PC strip: YRI1/YRI2 coloured, others grey, jitter carries no quantity."""
+    pop, pc = d.population.values, d.pc1.values
+    jitter = np.random.default_rng(0).uniform(-1, 1, len(pc))
+    other = ~np.isin(pop, ["YRI1", "YRI2"])
+    ax.scatter(pc[other], jitter[other], s=1.2, color=gs.BACKGROUND, edgecolors="none",
+               zorder=1, rasterized=True)
+    for p, color in (("YRI1", gs.POP1), ("YRI2", gs.POP2)):
+        sel = pop == p
+        ax.scatter(pc[sel], jitter[sel], s=1.5, color=color, alpha=0.9, edgecolors="none",
+                   zorder=2, rasterized=True)
+    ax.set_ylim(-1.15, 1.15)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    # baseline 1.6 mm above the strip, level with the panel letter beside it
+    ax.text(0.5, 1 + 1.6 / STRIP_H, rf"$\phi_1=\phi_2={d.phi.iloc[0]:g}$,  "
+            rf"$\langle\hat u,u\rangle^2={d.overlap.iloc[0]:.2f}$",
+            transform=ax.transAxes, ha="center", va="baseline", fontsize=gs.TICK_PT)
+    return int(d["rank"].iloc[0])
+
+
+def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR):
+    gs.setup()
+    pc1 = pd.read_csv(os.path.join(analysis_dir, "pc1.csv"))
+    meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).set_index("label")
     curves, crossings, points, theory = load_summary(summary_dir)
 
-    # No eigenvalue threshold marker. Not because the edge is wrong -- rank K-1 = the 4th
-    # highest eigenvalue is a clean edge here (sub-threshold lambda/lambda_bulk = 1.009,
-    # as good as the split's 1.008) -- but because converting the fitted nu_c into an Fst
-    # is ill-conditioned for this axis. nu = eps_0 + s*Fst carries a pedestal eps_0 = 0.215
-    # that is 31-53% of nu_c, so d log x_c / d log nu_c runs 1.5-2.2 and an 8-13% error in
-    # nu_c becomes a 26-54% error in Fst. In nu space the estimate is 0.79 +/- 0.02; in Fst
-    # space 0.67 +/- 0.09. nu_c_emp is in crossings.csv for anyone who wants it.
-    fig, axes = plt.subplots(1, 2, figsize=figsize(6.5, 4.35))
+    H = TOP_H + pair_height(6, WIDTH, AX_H)
+    fig = gs.blank_figure(WIDTH, H)
 
-    res_N = crossing_panel_from_summary(
-        axes[0], curves, crossings, points, sweep="african_split_vary_N",
-        cmap=CMAP_N, cbar_label=r"$N$", target=target, theory_table=theory, standardized=standardized,
-        show_eig_threshold=False)
-    res_H = crossing_panel_from_summary(
-        axes[1], curves, crossings, points, sweep="african_split_vary_harmonic_phi",
-        cmap=CMAP_H, cbar_label=r"$\tilde{\phi}$", target=target, theory_table=theory, standardized=standardized,
-        show_eig_threshold=False)
+    # Top row: demography (a) beside two stacked PC strips (b, c), letters on one line
+    dem_w, strip_x = 30.0, LEFT + 30.0 + 7.0
+    strip_w = WIDTH - strip_x - RIGHT
+    strip_tops = (H - 4.0, H - 21.0)
+    ax_dem = gs.axes_mm(fig, LEFT, strip_tops[1] - STRIP_H, dem_w,
+                        H - 3.0 - (strip_tops[1] - STRIP_H))
+    panel_demography(ax_dem, float(meta.loc[LABEL, "t_split"]))
+    gs.label_panel_mm(fig, "a", 0.3, H)
 
-    # Only the x label is set here: the y label is the panel's own (cosine similarity),
-    # set by crossing_panel_from_summary.
-    for ax in axes:
-        style_swept_axis(ax, r"$F_{ST}$")
-    axes[0].set_title(L_title("african_split_vary_N",
-                              r"varying $N$  ($\tilde{\phi}=0.20$)"))
-    axes[1].set_title(L_title("african_split_vary_harmonic_phi",
-                              r"varying $\phi_1,\phi_2$  ($N=1000$)"))
+    for i, (phi, top) in enumerate(zip(sorted(pc1.phi.unique()), strip_tops)):
+        ax = gs.axes_mm(fig, strip_x, top - STRIP_H, strip_w, STRIP_H)
+        rank = panel_pc(ax, pc1[(pc1.label == LABEL) & (pc1.phi == phi)])
+        gs.label_panel_mm(fig, "bc"[i], strip_x - 5.5, top + 4.0)
+    ax.set_xlabel(f"PC{rank + 1} (YRI1/YRI2 axis)")
 
-    for ax in axes:
-        variant_note(ax, standardized)
-
-    for ax, letter in zip(axes, "AB"):
-        # Offset in POINTS, not axes fraction: at 12 pt the fractional offset put the
-        # letter on the "using L_eff" row and the panel title.
-        ax.text(0.0, 1.0, letter, transform=ax.transAxes + ScaledTranslation(
-            -34 / 72, 26 / 72, fig.dpi_scale_trans),
-            fontsize=PANEL_LETTER_SIZE, fontweight="bold", va="top")
-
-    # tight_layout knows nothing about the figure-level key, so the bottom margin is
-    # opened for it after the fact; wspace holds panel B's y-axis label clear of A.
-    handles = encoding_handles(target=target)
-    # reserve_side_legend, not a bare wspace: the per-panel keys are anchored OUTSIDE
-    # the axes, so tight_layout cannot see them and lays the axes across the full
-    # width -- the key then lands on the neighbouring panel. This reserves the
-    # legend's width in inches so each panel keeps its own square.
-    reserve_side_legend(fig, n_panels=2, bottom=encoding_bottom_margin(handles, fig=fig))
-    figure_encoding_legend(fig, handles)
-    out = save_figure(fig, figure_dir, "PhaseTransitionAfricanSplit", standardized)
-    print(f"wrote {out}")
+    panels = [dict(curves=curves, crossings=crossings, points=points, theory=theory,
+                   sweep="african_split_vary_N", title=r"$N$"),
+              dict(curves=curves, crossings=crossings, points=points, theory=theory,
+                   sweep="african_split_vary_harmonic_phi", title=r"$\tilde{\phi}$")]
+    _, (res_N, res_H) = draw_pair(fig, panels, r"$F_{ST}$", WIDTH, AX_H, top_mm=TOP_H,
+                                  letters="de")
+    print(f"wrote {gs.save(fig, 'PhaseTransitionAfricanSplit', 'main')}")
     print(crossing_table(res_N, "N", "Fst"))
     print(crossing_table(res_H, "H", "Fst"))
     return fig
 
 
-def make_all(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
-    """Both versions: the ordinary GRM and the standardized one, same theory marks."""
-    return [make_figure(summary_dir, figure_dir, target, standardized=s)
-            for s in (False, True)]
-
-
 if __name__ == "__main__":
-    make_all()
-
-# %%
+    make_figure()

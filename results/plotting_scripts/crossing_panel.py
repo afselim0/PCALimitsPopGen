@@ -67,23 +67,23 @@ from plotting_style import (PANEL_LETTER_PT, TITLE_PT, LABEL_PT, TICK_PT,
 
 # The scatter is deliberately faint: it is context for the fit, and at 8 replicates x ~100
 # x-values it will otherwise swamp the band drawn on top of it.
-POINT_KW = dict(s=3, alpha=0.10, linewidths=0, zorder=1)
+POINT_KW = dict(s=1.5, alpha=0.12, linewidths=0, zorder=1, rasterized=True)
 # Bands here are genuinely narrow (a typical one is ~0.015 in cos^2, a few points on the
 # page), so they need enough alpha to register against the scatter rather than blending
 # into it.
 BAND_KW = dict(alpha=0.45, linewidth=0, zorder=2)
-FIT_KW = dict(linewidth=1.1, zorder=3)
+FIT_KW = dict(linewidth=1.0, zorder=3)
 # The crossing is marked on the curve itself, at the SAME size as the tau square below it:
 # both are measured locations on the x axis, and at 4 pt this marker was wider than its own
 # CI bar and hid the interval it exists to locate. No white edge either, for the same
 # reason -- a 1 pt ring on a small marker is half its radius. Neighbouring markers are
 # separated by colour and by the curve each sits on.
-CROSS_MARKER_KW = dict(marker="o", markersize=2.2, zorder=5, linestyle="none")
+CROSS_MARKER_KW = dict(marker="o", markersize=2.6, zorder=5, linestyle="none")
 # The target crossing's CI: a CAPPED horizontal bar at the target level through the marker,
 # drawn ABOVE it (zorder 6 > 5) so it stays visible. Capped and styled to match TAU_CI_KW --
 # an uncapped segment at the target level read as a piece of the curve rather than as an
 # interval with ends.
-CROSS_CI_KW = dict(linewidth=0.8, capsize=2.2, capthick=0.8, alpha=1.0, zorder=6)
+CROSS_CI_KW = dict(linewidth=0.6, capsize=2.2, capthick=0.6, alpha=1.0, zorder=6)
 
 # --- the measured detection threshold, on the x axis ------------------------
 #
@@ -95,14 +95,14 @@ CROSS_CI_KW = dict(linewidth=0.8, capsize=2.2, capthick=0.8, alpha=1.0, zorder=6
 # No white marker edge here, unlike the crossing circle. The CI bar runs THROUGH this
 # marker, and a white edge punches a gap in it on both sides that reads as two detached
 # bars rather than one interval.
-TAU_MARKER_KW = dict(marker="s", markersize=2.2, linestyle="none", zorder=7,
+TAU_MARKER_KW = dict(marker="s", markersize=2.6, linestyle="none", zorder=7,
                      clip_on=False)
 # A plain horizontal bar reads as a line segment of unknown extent; capped ends state where
 # the interval stops. Drawn with errorbar's capsize, whose caps are vertical ticks.
 # capsize sets the HALF-HEIGHT of the two vertical end bars. They must out-reach the
 # square (markersize 2.2 pt) or the interval is invisible under it: on a log axis a
 # realistic 10% CI spans only ~4% of the panel, which is barely wider than the marker.
-TAU_CI_KW = dict(linewidth=0.8, capsize=2.2, capthick=0.8, alpha=1.0, zorder=8,
+TAU_CI_KW = dict(linewidth=0.6, capsize=2.2, capthick=0.6, alpha=1.0, zorder=8,
                  clip_on=False)
 # Where that row sits, in AXES FRACTION: on the x axis line itself. Both measured marks are
 # statements about a location in x, and putting this one on the axis makes it directly
@@ -132,11 +132,11 @@ def style_swept_axis(ax, label, tick_row=None):
 
 
 
-THEORY_VLINE_KW = dict(linewidth=0.9, linestyle=(0, (4, 2)), zorder=4)
+THEORY_VLINE_KW = dict(linewidth=0.7, linestyle=(0, (4, 2)), zorder=4)
 # The theoretical detection threshold, at nu(x) = nu_c: where the eigenvalue separates from
 # the bulk and cos^2 leaves 0 in the N -> infinity limit. Dotted, against the target
 # crossing's dashes; neither reads as the fitted curve's solid line.
-THEORY_PICKUP_VLINE_KW = dict(linewidth=0.9, linestyle=(0, (1.2, 1.8)), zorder=4)
+THEORY_PICKUP_VLINE_KW = dict(linewidth=0.7, linestyle=(0, (1.2, 1.8)), zorder=4)
 
 # --- which theoretical routes are drawn ------------------------------------
 #
@@ -175,8 +175,8 @@ TICK_ROUTE = "crude"
 # diamond for the crossing stay distinct from each other and from both measured marks at
 # 3-4 pt, which the old bar-and-dot pair did not -- the dot was simply a smaller circle.
 TICK_KW = {
-    "pickup": dict(marker="v", markersize=3.4, linestyle="none"),
-    "cross":  dict(marker="D", markersize=2.6, linestyle="none"),
+    "pickup": dict(marker="v", markersize=3.2, linestyle="none"),
+    "cross":  dict(marker="D", markersize=2.4, linestyle="none"),
 }
 # In axes fraction, ABOVE the top of the panel. Under the axis the row had to clear the
 # numeric x-tick labels, which forced the x-axis label down by AXIS_LABELPAD and left it

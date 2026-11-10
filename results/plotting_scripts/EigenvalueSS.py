@@ -1,144 +1,108 @@
 #%%
 """
-Verify the closed-form stepping-stone eigenvalue against the measured one, 1D and 2D.
+Closed-form stepping-stone eigenvalue against the measured one (supplementary figure).
 
-A single K per dimension (no K sweep), so the swept quantities are n_per_deme (color) and
-M (marker shape): the median measured eigenvalue (from
-src/analysis/SteppingStoneEvenSampling.py) against the closed-form nu_theory, at a handful
-of representative M per n_per_deme in the even-sampling sweep.
+a  1D (K = 25 demes)
+b  2D (K x K = 9 x 9 demes; nu_theory is the degenerate pair's shared value, nu_meas the mean
+   eigenvalue of the two sample eigenvectors matched to it)
 
-A  1D
-B  2D (nu_theory is the degenerate pair's shared value; nu_meas is the mean eigenvalue
-   of the two sample eigenvectors matched to it by overlap)
+Median measured eigenvalue (src/analysis/SteppingStoneEvenSampling.py) against
+nu_1 = n / (4 M sin^2(pi/2K)); colour = n per deme, marker = M (a few representative values
+per panel). Only cells with median cos^2 > MIN_COS are drawn: below that the matched sample
+eigenvalue is not an estimate of nu_1.
 
-Only cells whose measured cosine similarity exceeds MIN_COS are plotted: where the axis is
-not recovered the matched sample eigenvalue is not an estimate of nu_1 (see MIN_COS).
-
-Reads results/analysis/SteppingStoneEvenSampling, writes
-results/figures/EigenvalueSS.pdf
+Reads results/analysis/SteppingStoneEvenSampling/even_{1D,2D}.csv
+Writes results/figures/supplement/EigenvalueSS.pdf
 """
 import os
 
-import matplotlib.pyplot as plt
-from matplotlib.transforms import ScaledTranslation
 import numpy as np
 import pandas as pd
+from matplotlib.legend import Legend
+from matplotlib.lines import Line2D
 
-from crossing_panel import PANEL_LETTER_SIZE, figsize, save_figure
-from plotting_style import setup_plotting_style, okabe_ito
+import genetics_style as gs
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStoneEvenSampling")
-FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
-NU1_LABEL = r'$\nu_1 = \dfrac{n}{4M\sin^2(\pi/2K)}$'
+W, H = 130, 75
+AX, LEFT, GAP, BOTTOM = 47, 13, 19, 24
+NU1_LABEL = r"$\nu_1 = n\,/\,(4M\sin^2(\pi/2K))$"
 NUM_M_LEVELS = 5
-MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X']
+MARKERS = ["o", "s", "^", "D", "v"]
 N_PER_DEME = [2, 4, 8, 16, 32]
-# Only cells whose eigenvector is actually recovered. Below this the sample eigenvector is
-# a poor match for the theoretical axis, and the "measured" eigenvalue is then not an
-# estimate of nu_1 at all -- it is the eigenvalue of whichever sample axis happened to be
-# matched, biased low by the bulk it has not yet separated from. Including those points
-# would show a spurious downward curvature that is an artefact of the matching, not a
-# failure of the closed form.
 MIN_COS = 0.75
+COLORS = gs.seq_colors(len(N_PER_DEME))
 
 
 def representative_M(df, num_levels=NUM_M_LEVELS):
-    """
-    num_levels simulated M values, log-spaced targets snapped to the nearest available M.
-
-    Chosen from whatever `df` holds, so when it is the cosine-filtered frame the levels are
-    drawn from the M range that actually survives the filter. Picking them from the full
-    grid instead would put most levels at high M, where nothing is recovered, and leave the
-    panel nearly empty.
-    """
+    """num_levels distinct simulated M values nearest to log-spaced targets."""
     m_available = np.sort(df.M.unique())
-    targets = np.geomspace(m_available.min(), m_available.max(), num_levels)
-    # Snap each target to the nearest M not already taken, so num_levels distinct levels
-    # come back: two adjacent targets can otherwise snap to the same simulated M and the
-    # legend silently loses a marker.
     chosen = []
-    for t in targets:
-        order = np.argsort(np.abs(m_available - t))
-        for j in order:
-            if j not in chosen:
-                chosen.append(int(j))
-                break
+    for t in np.geomspace(m_available.min(), m_available.max(), num_levels):
+        j = next(int(j) for j in np.argsort(np.abs(m_available - t)) if j not in chosen)
+        chosen.append(j)
     return m_available[np.sort(chosen)]
 
 
 def _fmt_M(v):
-    """M as a plain number when it is one, else LaTeX 'm x 10^e' -- never '1.03e+03'."""
     v = float(v)
     if v >= 1000:
         e = int(np.floor(np.log10(v)))
-        return rf"{v / 10.0 ** e:.1f} \times 10^{{{e}}}"
+        return rf"${v / 10.0 ** e:.1f} \times 10^{{{e}}}$"
     return f"{v:.0f}" if v == int(v) else f"{v:.3g}"
 
 
-def panel(ax, df, title):
-    """nu_meas (median over replicates) vs nu_theory: color = n_per_deme, marker = M, y=x dotted."""
+def panel(ax, df):
+    """nu_meas vs nu_theory; returns the M-key handles."""
     df = df[df.n_per_deme.isin(N_PER_DEME) & (df.median_cos > MIN_COS)]
-    n_values = np.sort(df.n_per_deme.unique())
     m_values = representative_M(df)
-    color_of = {n: okabe_ito[i % len(okabe_ito)] for i, n in enumerate(n_values)}
-    marker_of = {m: MARKERS[i % len(MARKERS)] for i, m in enumerate(m_values)}
-
     d = df[df.M.isin(m_values)]
     lim = [min(d.nu_theory.min(), d.nu_meas.min()) * 0.8,
            max(d.nu_theory.max(), d.nu_meas.max()) * 1.2]
-    ax.plot(lim, lim, ':', color='0.35', linewidth=1.4, zorder=1, label=r'$y=x$')
-
-    for n_per in n_values:
-        for m in m_values:
+    ax.plot(lim, lim, ":", color="0.35", linewidth=0.8, zorder=1)
+    for n_per, c in zip(N_PER_DEME, COLORS):
+        for m, mk in zip(m_values, MARKERS):
             cell = d[(d.n_per_deme == n_per) & (d.M == m)]
-            ax.scatter(cell.nu_theory, cell.nu_meas, s=28, color=color_of[n_per],
-                      marker=marker_of[m], edgecolors='none', alpha=0.85, zorder=3)
-
-    ax.set_xscale('log')
-    ax.set_yscale('log')
+            ax.scatter(cell.nu_theory, cell.nu_meas, s=14, color=c, marker=mk,
+                       edgecolors="none", alpha=0.9, zorder=3)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.set_xlim(lim)
     ax.set_ylim(lim)
     ax.set_xlabel(NU1_LABEL)
-    ax.set_ylabel(r'measured $\nu_1$ (median)')
-    ax.set_title(title)
-
-    n_handles = [plt.Line2D([], [], marker='o', linestyle='none', color=color_of[n],
-                            markersize=6, label=f'{n:g}') for n in n_values]
-    m_handles = [plt.Line2D([], [], marker=marker_of[m], linestyle='none', color='0.3',
-                            markersize=6, label=f'${_fmt_M(m)}$') for m in m_values]
-    # y=x is NOT one of the n-per-deme colours, so it does not belong under that title --
-    # listed there it read as another curve level. It goes in the M key's frame instead,
-    # which has no such heading conflict. Sizes come from the shared table, not a local
-    # number, so these keys match every other legend in the manuscript.
-    leg1 = ax.legend(handles=n_handles, title=r'$n_{\mathrm{per\,deme}}$',
-                     loc='upper left', frameon=False)
-    ax.add_artist(leg1)
-    ax.legend(handles=[*m_handles,
-                       plt.Line2D([], [], linestyle=':', color='0.35', label=r'$y=x$')],
-              title=r'$M$', loc='lower right', frameon=False)
+    ax.set_ylabel(r"measured $\nu_1$ (median)")
+    return [Line2D([], [], marker=mk, linestyle="none", color="0.3", markersize=3.5,
+                   label=_fmt_M(m)) for m, mk in zip(m_values, MARKERS)]
 
 
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
-    setup_plotting_style()
-    df_1d = pd.read_csv(os.path.join(analysis_dir, "even_1D.csv"))
-    df_2d = pd.read_csv(os.path.join(analysis_dir, "even_2D.csv"))
+def make_figure(analysis_dir=ANALYSIS_DIR):
+    gs.setup()
+    fig = gs.blank_figure(W, H)
+    lefts = [LEFT, LEFT + AX + GAP]
+    axes, m_keys = [], []
+    for name, left, letter in zip(["even_1D.csv", "even_2D.csv"], lefts, "ab"):
+        ax = gs.axes_mm(fig, left, BOTTOM, AX, AX)
+        m_handles = panel(ax, pd.read_csv(os.path.join(analysis_dir, name)))
+        axes.append(ax)
+        m_keys.append((m_handles, [h.get_label() for h in m_handles]))
+        gs.label_panel_mm(fig, letter, left - 12, H - 1)
+    # M keys: one row centred under each panel, matched spacing; y = x inside each panel
+    gs.matched_row_keys(axes, m_keys, 10.5, [r"$M$", r"$M$"])
+    y_eq_x = Line2D([], [], linestyle=":", color="0.35", linewidth=0.8, label=r"$y = x$")
+    for ax in axes:
+        ax.add_artist(Legend(ax, [y_eq_x], [y_eq_x.get_label()], loc="upper left",
+                             handlelength=1.6))
 
-    fig, axes = plt.subplots(1, 2, figsize=figsize(9.6, 4.4))
-    panel(axes[0], df_1d, rf'1D  ($K={int(df_1d.K.iloc[0])}$)')
-    panel(axes[1], df_2d, rf'2D  ($K={int(df_2d.K.iloc[0])}$)')
-
-    for ax, letter in zip(axes, "AB"):
-        # Offset in POINTS, not axes fraction: a fraction of a 2.6 in panel is much
-        # less page than a fraction of the old wide one, so the fractional offset put
-        # panel B's letter inside panel A.
-        ax.text(0.0, 1.0, letter, transform=ax.transAxes + ScaledTranslation(
-            -22 / 72, 12 / 72, fig.dpi_scale_trans),
-            fontsize=PANEL_LETTER_SIZE, fontweight='bold', va='top')
-
-    fig.tight_layout()
-    out = save_figure(fig, figure_dir, "EigenvalueSS")
+    # n key: colours shared by both panels, centred under the pair of panels
+    n_handles = [Line2D([], [], marker="o", linestyle="none", color=c, markersize=3.5,
+                        label=f"{n}") for n, c in zip(N_PER_DEME, COLORS)]
+    fig.legend(handles=n_handles, title="samples per deme $n$", loc="lower center",
+               bbox_to_anchor=((LEFT + AX + GAP / 2) / W, 0.8 / H), ncol=len(n_handles),
+               borderaxespad=0, borderpad=0, handlelength=1.2, handletextpad=0.3,
+               columnspacing=1.0)
+    out = gs.save(fig, "EigenvalueSS", "supplement")
     print(f"wrote {out}")
     return fig
 

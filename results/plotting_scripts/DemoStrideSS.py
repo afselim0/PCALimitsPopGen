@@ -35,8 +35,130 @@ import pandas as pd
 
 from crossing_panel import TITLE_PT, figsize, save_figure
 from plotting_style import setup_plotting_style
-from DemoRandomSS import (_section_title, pc_panel_1d, pc_panel_2d, scheme_1d,
-                                     scheme_2d)
+import numpy as np
+from matplotlib import cm
+from matplotlib.patches import Circle
+from crossing_panel import PANEL_LETTER_SIZE
+from DemoRecentSS import grid_color
+
+# Helpers inlined from the pre-GENETICS DemoRandomSS, which no longer provides them.
+COLOR_EDGE = "0.2"
+CMAP_1D = cm.viridis
+ALPHA_SAMPLED = 0.95
+ALPHA_UNSAMPLED = 0.15
+
+
+# Half-height of the PC1 jitter band on a +/-1 y axis. Small on purpose -- see pc_panel_1d.
+JITTER_1D = 0.16
+
+
+def chain_color(deme, K):
+    """viridis along the 1D chain -- the counterpart of grid_color for one dimension."""
+    return CMAP_1D(deme / max(K - 1, 1))
+
+
+def _blank_axes(ax):
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def scheme_1d(ax, demes, K):
+    """A chain of K circles, connected by lines, colored by deme index, faded if unsampled."""
+    ax.plot([0, K - 1], [0, 0], "-", color=COLOR_EDGE, linewidth=1.0, zorder=1)
+    for x in range(K):
+        alpha = ALPHA_SAMPLED if bool(demes[demes.deme == x].sampled.iloc[0]) else ALPHA_UNSAMPLED
+        ax.add_patch(Circle((x, 0), 0.42, facecolor=chain_color(x, K), edgecolor=COLOR_EDGE,
+                            linewidth=0.9, alpha=alpha, zorder=2))
+    ax.set_xlim(-0.7, K - 0.3)
+    ax.set_ylim(-1.0, 1.0)
+    ax.set_aspect("equal")
+    _blank_axes(ax)
+
+
+def scheme_2d(ax, demes, K):
+    """A K x K grid of circles, nearest-neighbour lines, colored by grid position, faded
+    if unsampled."""
+    for r in range(K):
+        for c in range(K):
+            if c + 1 < K:
+                ax.plot([c, c + 1], [r, r], "-", color=COLOR_EDGE, linewidth=0.8, zorder=1)
+            if r + 1 < K:
+                ax.plot([c, c], [r, r + 1], "-", color=COLOR_EDGE, linewidth=0.8, zorder=1)
+    for r in range(K):
+        for c in range(K):
+            sampled = bool(demes[(demes.row == r) & (demes.col == c)].sampled.iloc[0])
+            alpha = ALPHA_SAMPLED if sampled else ALPHA_UNSAMPLED
+            ax.add_patch(Circle((c, r), 0.40, facecolor=grid_color(r, c, K),
+                                edgecolor=COLOR_EDGE, linewidth=0.7, alpha=alpha, zorder=2))
+    pad = 0.45
+    ax.set_xlim(-pad, K - 1 + pad)
+    ax.set_ylim(-pad, K - 1 + pad)
+    ax.set_aspect("equal")
+    _blank_axes(ax)
+
+
+def pc_panel_1d(ax, d, K, rng=None):
+    """
+    PC1 on x, with a shallow jitter on y -- the y axis carries no information.
+
+    Without the jitter the samples of one deme land on a single point and the density along
+    PC1 is unreadable. The band is deliberately thin (JITTER_1D of a +/-1 axis) so it
+    separates points without reading as a second PC.
+    """
+    rng = np.random.default_rng(0) if rng is None else rng
+    c = [chain_color(int(j), K) for j in d.deme]
+    y = rng.uniform(-JITTER_1D, JITTER_1D, len(d))
+    ax.scatter(d.pc1, y, c=c, s=2.5, edgecolors="none", alpha=0.85)
+    ax.set_ylim(-1, 1)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("PC1")
+
+
+def pc_panel_2d(ax, d, K):
+    """PC1 vs PC2 on a square panel: the two PCs span a degenerate eigenvalue pair, so
+    equal data ranges on both axes keep the recovered grid from looking stretched."""
+    c = [grid_color(int(r), int(cc), K) for r, cc in zip(d.row, d.col)]
+    ax.scatter(d.pc1, d.pc2, c=c, s=2.5, edgecolors="none", alpha=0.85)
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    lim = 1.08 * max(np.abs(d.pc1).max(), np.abs(d.pc2).max())
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_box_aspect(1)
+
+
+def _section_title(fig, row_axes, text, pad, letter=None):
+    """
+    A title spanning one section, placed clear of that section's column titles.
+
+    `letter` labels the whole block (its two rows), drawn bold at the LEFT edge of the
+    section while the title itself stays centred and NOT bold -- the panel letter is the
+    only type in the figure set that is bold, so a bold section title competed with it.
+
+    The clearance is MEASURED from the rendered column titles, not assumed: `pad` is only
+    the extra gap left above them. A fixed figure-fraction offset is not a fixed amount of
+    page -- the same 0.025 that cleared the column titles on the old 10.5 in-tall canvas is
+    a third as much ink on the 6.5 in-wide page, and the section title landed on top of
+    them.
+    """
+    fig.canvas.draw()                      # titles have no extent until the figure renders
+    inv = fig.transFigure.inverted()
+    boxes = [ax.get_position() for ax in row_axes]
+    x = 0.5 * (min(b.x0 for b in boxes) + max(b.x1 for b in boxes))
+    top = max(b.y1 for b in boxes)
+    for ax in row_axes:
+        if ax.get_visible() and ax.get_title():
+            bb = inv.transform_bbox(ax.title.get_window_extent(fig.canvas.get_renderer()))
+            top = max(top, bb.y1)
+    fig.text(x, top + pad, text, ha="center", va="bottom", fontsize=TITLE_PT)
+    if letter:
+        fig.text(min(b.x0 for b in boxes) - 0.035, top + pad, letter, ha="left",
+                 va="bottom", fontsize=PANEL_LETTER_SIZE, fontweight="bold")
+
+
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStoneStrideDemo")

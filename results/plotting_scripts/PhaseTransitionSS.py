@@ -1,99 +1,36 @@
-#%%
 """
-Spatial-axis recovery vs migration, sampling every deme.
+Main Fig. 5: spatial-axis recovery in the 1D and 2D stepping-stone models vs 1/M.
 
-A  1D stepping stone, every deme sampled, curves are n-per-deme.
-B  2D stepping stone, every deme sampled, curves are n-per-deme (degenerate leading pair).
-
-x is 1/M rather than M: overlap grows as migration weakens, so the reciprocal makes the
-transition curve increasing. That reciprocal is applied in the analysis, not here.
-
-The fit (flat below the fitted transition, monotone increasing above), its 95% band and the theoretical
-crossing are computed upstream by src/sweeps_analysis/summarise.py and read here as columns
--- this script draws, it does not fit, and it holds no theory of its own. A filled marker
-sits on the curve where it reaches the target, a square on the x axis marks the fitted
-detection threshold, and dashed / dotted vertical lines mark where theory reaches each.
-
-2D compares the degenerate (1,0)/(0,1) pair as a subspace (procrustes-aligned principal
-angles), since no canonical basis exists inside a degenerate eigenspace.
+a  1D (K = 25 demes), five values of n per deme, every deme sampled.
+b  2D (9 x 9 demes), same n grid; cosine similarity of the Procrustes-aligned PC1-PC2 plane.
 
 Reads results/sweep_summaries/stepping_stone_even/{curves,crossings,points}.csv
-Writes results/figures/PhaseTransitionSS.pdf
+Writes results/figures/main/PhaseTransitionSS.pdf (single column)
 """
 import os
 
-import matplotlib.pyplot as plt
-from matplotlib.transforms import ScaledTranslation
-import pandas as pd
-from matplotlib import cm
+import genetics_style as gs
+from crossing_panel import crossing_table, load_summary
+from sweep_figure import draw_pair, pair_height
 
-from crossing_panel import (reserve_side_legend, PANEL_LETTER_SIZE, figsize, DEFAULT_TARGET, L_title, crossing_panel_from_summary,
-                            crossing_table, encoding_handles, figure_encoding_legend,
-                            encoding_bottom_margin, load_summary, save_figure,
-                            style_swept_axis, variant_note)
-from plotting_style import setup_plotting_style
-
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries", "stepping_stone_even")
-FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
-
-CMAP = cm.viridis
-TARGET = DEFAULT_TARGET
+SUMMARY_DIR = os.path.join(gs._ROOT, "results", "sweep_summaries", "stepping_stone_even")
+WIDTH, AX_H = gs.WIDTH["single"] / gs.MM, 34.0
 SWEEPS = [("ss1d_vary_n", "1D"), ("ss2d_vary_n", "2D")]
 
 
-def make_figure(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET,
-                standardized=False):
-    setup_plotting_style()
+def make_figure(summary_dir=SUMMARY_DIR):
+    gs.setup()
     curves, crossings, points, theory = load_summary(summary_dir)
+    panels = [dict(curves=curves, crossings=crossings, points=points, theory=theory,
+                   sweep=sweep, title=r"$n$ per deme") for sweep, _ in SWEEPS]
 
-    # The eigenvalue threshold marker is off here: K ~ N in the stepping stones, so
-    # many structure axes are detached at once and the single-spike fit behind that
-    # marker does not apply (sub-threshold lambda/lambda_bulk is 1.16-1.28, not 1).
-    fig, axes = plt.subplots(1, 2, figsize=figsize(6.5, 4.35))
-    results = []
-    for ax, (sweep, label) in zip(axes, SWEEPS):
-        res = crossing_panel_from_summary(ax, curves, crossings, points, sweep=sweep,
-                                          cmap=CMAP, cbar_label=r"$n_{\mathrm{per\,deme}}$", target=target, theory_table=theory, standardized=standardized, show_eig_threshold=False)
-        style_swept_axis(ax, r"$1/M$")
-        ax.set_title(L_title(sweep, label))
-        results.append(res)
-
-    for ax in axes:
-        variant_note(ax, standardized)
-
-    for ax, letter in zip(axes, "AB"):
-        # Offset in POINTS, not axes fraction: at 12 pt the fractional offset put the
-        # letter on the "using L_eff" row and the panel title.
-        ax.text(0.0, 1.0, letter, transform=ax.transAxes + ScaledTranslation(
-            -34 / 72, 26 / 72, fig.dpi_scale_trans),
-            fontsize=PANEL_LETTER_SIZE, fontweight="bold", va="top")
-
-    # tight_layout knows nothing about the figure-level key, so the bottom margin is
-    # opened for it after the fact; wspace holds panel B's y-axis label clear of A.
-    handles = encoding_handles(target=target)
-    # reserve_side_legend, not a bare wspace: the per-panel keys are anchored
-    # OUTSIDE the axes, so tight_layout cannot see them and lays the axes across the
-    # full width -- the key then lands on the neighbouring panel. This reserves the
-    # legend's width in inches so each panel keeps its own square.
-    reserve_side_legend(fig, n_panels=2,
-                        bottom=encoding_bottom_margin(handles, fig=fig))
-    figure_encoding_legend(fig, handles)
-    out = save_figure(fig, figure_dir, "PhaseTransitionSS", standardized)
-    print(f"wrote {out}")
+    fig = gs.blank_figure(WIDTH, pair_height(5, WIDTH, AX_H))
+    _, results = draw_pair(fig, panels, r"$1/M$", WIDTH, AX_H, top_mm=0)
+    print(f"wrote {gs.save(fig, 'PhaseTransitionSS', 'main')}")
     for (_, label), res in zip(SWEEPS, results):
-        print(f"\n{label}")
-        print(crossing_table(res, "n", "1/M"))
+        print(f"\n{label}\n{crossing_table(res, 'n', '1/M')}")
     return fig
 
 
-def make_all(summary_dir=SUMMARY_DIR, figure_dir=FIGURE_DIR, target=TARGET):
-    """Both versions: the ordinary GRM and the standardized one, same theory marks."""
-    return [make_figure(summary_dir, figure_dir, target, standardized=s)
-            for s in (False, True)]
-
-
 if __name__ == "__main__":
-    make_all()
-
-# %%
+    make_figure()

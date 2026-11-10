@@ -1,353 +1,184 @@
 #%%
 """
-Three RMT phenomena on a two-population split, at N = 400 and L_input = 2e4.
+Figure 1 (single column): three RMT phenomena on a two-population split, N = 400.
 
-A  Eigenvalue spreading. The bulk eigenvalues of one spectrum (grey histogram) against
-   the Marchenko-Pastur density computed two ways: with the raw SNP count L, and with the
-   variance-effective count L_eff = (sum v)^2 / sum v^2, v = p(1-p). Only the L_eff curve
-   matches the observed bulk -- the GRM is built from unnormalized genotypes, so each
-   column enters with weight v_l and the aspect ratio is N/L_eff, not N/L. The thick black
-   line marks the identical theoretical eigenvalues, which as a density is a single spike.
+a  Eigenvalue spreading: bulk histogram against the Marchenko-Pastur density with raw L
+   and with L_eff; the black line is the (repeated) theoretical eigenvalue.
+b  BBP phase transition: lambda_1 / lambda_2 against Fst, with the critical Fst from raw
+   L and from L_eff (dotted).
+c  Eigenvector inconsistency: <v1_hat, v1>^2 against Fst -- the single_split sweep's fit,
+   band and exact theory at N = 400 -- with PC1 at three Fst values underneath.
 
-B  BBP phase transition. The gap lambda_1 / lambda_2 against Fst, one spectrum per
-   Fst (no replicates). Below threshold the spike is absorbed in the bulk and the ratio
-   sits near 1; above it the spike detaches and the ratio climbs.
-
-C  Eigenvector inconsistency. The measured <v1_hat, v1>^2 against Fst at N = 400, with
-   its 95% confidence band, against the theoretical curve. All three are READ from
-   results/sweep_summaries/single_split -- the same fit, band and theory the single-split
-   sweep figure draws -- so this panel cannot disagree with figure 3. PC1 scatters sit below at three Fst
-   values: very small, just above the detection threshold, and very large.
-
-Both B and C mark the two candidate thresholds, Fst_c = 1/(2*phi*(1-phi)*sqrt(N*L)) with
-raw L and with L_eff, so the panels show which one the transition actually respects.
-
-Reads results/analysis/RMTPhenomena, writes results/figures/RMTPhenomena.pdf
+Reads results/analysis/RMTPhenomena and results/sweep_summaries/single_split.
+Writes results/figures/main/RMTPhenomena.pdf
 """
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.transforms import ScaledTranslation
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
-from crossing_panel import PANEL_LETTER_SIZE, figsize, save_figure
-from plotting_style import ANNOT_PT, okabe_ito, setup_plotting_style
+import genetics_style as gs
 
-
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "RMTPhenomena")
-# Panel C reads its fitted curve, band and theory from the sweep pipeline's own output.
-SUMMARY_DIR = os.path.join(_PROJECT_ROOT, "results", "sweep_summaries", "single_split")
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ANALYSIS_DIR = os.path.join(_ROOT, "results", "analysis", "RMTPhenomena")
+SUMMARY_DIR = os.path.join(_ROOT, "results", "sweep_summaries", "single_split")
 SWEEP_LEVEL = 400
-FIGURE_DIR = os.path.join(_PROJECT_ROOT, "results", "figures")
 
-COLOR_MAIN = okabe_ito[1]        # vermillion: panel C's fitted cosine-similarity curve
-COLOR_GAP = okabe_ito[2]         # green: panel B's measured eigenvalue-gap curve --
-                                  # a different quantity (a ratio, not a fit) from C's,
-                                  # so it gets its own color rather than sharing COLOR_MAIN
-COLOR_EFF = okabe_ito[0]         # blue: theory with L_eff
-COLOR_RAW = okabe_ito[3]         # orange: theory with raw L
-COLOR_POP1, COLOR_POP2 = 'crimson', 'royalblue'
-# Half-height of the PC1 jitter band in the insets, whose y limits are +/-1.
+COLOR_RAW, COLOR_EFF = "#E69F00", "#0072B2"   # theory with raw L / with L_eff
+COLOR_GAP = "#009E73"                         # measured eigenvalue ratio
+COLOR_FIT = "#D55E00"                         # measured cosine similarity
+COLOR_THEORY = "0.25"
 INSET_JITTER = 0.18
-# Inset height as a fraction of the square it would otherwise be -- see add_insets.
-INSET_ASPECT = 1.0
+
+# Layout (mm): three panels across 87.9 mm
+W, H = gs.WIDTH["single"] / gs.MM, 46.0
+PANEL_Y, PANEL_H = 20.5, 21.5
+PANEL_X = [(7.6, 19.5), (35.0, 19.5), (63.0, 23.5)]
+KEY_TOP = 12.6
 
 
 def sci_latex(x, digits=1):
-    """Format x as a LaTeX 'm \\times 10^{e}' string rather than matplotlib's '1.2e-03'."""
-    exponent = int(np.floor(np.log10(abs(x)))) if x != 0 else 0
-    mantissa = x / 10.0 ** exponent
-    return rf'{mantissa:.{digits}f} \times 10^{{{exponent}}}'
+    e = int(np.floor(np.log10(abs(x)))) if x != 0 else 0
+    return rf"{x / 10.0 ** e:.{digits}f} \times 10^{{{e}}}"
 
 
 def mp_density(x, gamma, scale=1.0):
-    """MP density for a floor at `scale`, supported on scale * (1 -/+ sqrt(gamma))^2."""
+    """MP density for a floor at `scale`."""
     lo, hi = (1 - np.sqrt(gamma)) ** 2, (1 + np.sqrt(gamma)) ** 2
     u = np.asarray(x, dtype=float) / scale
     out = np.zeros_like(u)
-    inside = (u > lo) & (u < hi)
-    out[inside] = (np.sqrt((hi - u[inside]) * (u[inside] - lo))
-                   / (2 * np.pi * gamma * u[inside]))
+    m = (u > lo) & (u < hi)
+    out[m] = np.sqrt((hi - u[m]) * (u[m] - lo)) / (2 * np.pi * gamma * u[m])
     return out / scale
 
 
-def panel_A(ax, spectrum, meta):
-    """Bulk histogram against the two MP densities."""
+def panel_a(ax, spectrum, meta):
     bulk = spectrum.eigenvalue.values
     N = int(meta.N)
-    gamma_raw = N / float(spectrum.L_raw.iloc[0])
-    gamma_eff = N / float(spectrum.L_eff.iloc[0])
-    # The floor is where the theoretical eigenvalues sit and what both MP densities are
-    # centered on. The MP density has mean 1 (in floor units), so the bulk *mean* estimates
-    # it; the median does not -- the density is left-skewed, and at this gamma the median
-    # sits ~2.5% low, which would visibly offset the line from both curves' centers.
-    floor = float(bulk.mean())
-
-    ax.hist(bulk, bins=28, density=True, color='0.78', edgecolor='none',
-            label=f'{bulk.size} bulk eigenvalues')
-
-    # Each curve is drawn over its own support, so the narrower raw-L density is visibly
-    # confined well inside the observed bulk rather than being clipped to it.
-    L_raw = float(spectrum.L_raw.iloc[0])
-    L_eff = float(spectrum.L_eff.iloc[0])
-    for gamma, color, label in [
-            (gamma_raw, COLOR_RAW, rf'raw $L$  ({L_raw:.0f})'),
-            (gamma_eff, COLOR_EFF, rf'effective $L$  ({L_eff:.0f})')]:
-        grid = np.linspace(floor * (1 - np.sqrt(gamma)) ** 2,
-                           floor * (1 + np.sqrt(gamma)) ** 2, 800)
-        ax.plot(grid, mp_density(grid, gamma, scale=floor), color=color, linewidth=1.3,
-                label=label)
-
-    ax.axvline(floor, color='black', linewidth=1.4,
-               label=f'{bulk.size} identical theoretical $\\lambda$')
-    ax.set_xlabel(r'sample eigenvalue $\hat\lambda$')
-    ax.set_ylabel('density')
+    floor = float(bulk.mean())   # MP has mean 1 in floor units
+    ax.hist(bulk, bins=28, density=True, color="0.78", edgecolor="none")
+    for L, color in [(float(spectrum.L_raw.iloc[0]), COLOR_RAW),
+                     (float(spectrum.L_eff.iloc[0]), COLOR_EFF)]:
+        g = N / L
+        x = np.linspace(floor * (1 - np.sqrt(g)) ** 2, floor * (1 + np.sqrt(g)) ** 2, 600)
+        ax.plot(x, mp_density(x, g, scale=floor), "--", color=color, linewidth=1.0)
+    ax.axvline(floor, color="black", linewidth=1.0)
+    ax.set_xlabel(r"eigenvalue $\hat\lambda$")
+    ax.set_ylabel("density", labelpad=1)
     ax.set_ylim(bottom=0)
-    ax.set_title('Eigenvalue spreading')
-    # Below the panel, in the gridspec row reserved under A. Anchored to that row's own
-    # axes rather than floated at a figure coordinate, so the layout accounts for it --
-    # the earlier bbox_to_anchor=(0.5, -0.20) was invisible to tight_layout and drifted
-    # into the page margin when the canvas narrowed.
-    return ax.get_legend_handles_labels()
+    ax.set_xticks([0.75, 1.0, 1.25])
+    L_raw, L_eff = float(spectrum.L_raw.iloc[0]), float(spectrum.L_eff.iloc[0])
+    return [Patch(color="0.78", label=f"bulk ({bulk.size})"),
+            Line2D([], [], color=COLOR_RAW, ls="--", label=rf"MP, $L$ = {L_raw:,.0f}"),
+            Line2D([], [], color=COLOR_EFF, ls="--",
+                   label=rf"MP, $L_{{\mathrm{{eff}}}}$ = {L_eff:,.0f}"),
+            Line2D([], [], color="black", label=r"theory $\lambda$")]
 
 
-def _threshold_lines(ax, meta):
-    """The two candidate critical Fst, dotted."""
-    ax.axvline(float(meta.Fst_c_raw), color=COLOR_RAW, linestyle=':', linewidth=1.2,
-               label=r'$F_{ST}^{\mathrm{critical}}$ (raw $L$)')
-    ax.axvline(float(meta.Fst_c_eff), color=COLOR_EFF, linestyle=':', linewidth=1.2,
-               label=r'$F_{ST}^{\mathrm{critical}}$ (effective $L$)')
+def threshold_lines(ax, meta):
+    for x, c in [(meta.Fst_c_raw, COLOR_RAW), (meta.Fst_c_eff, COLOR_EFF)]:
+        ax.axvline(float(x), color=c, linestyle=":", linewidth=1.0)
 
 
-def panel_B(ax, gap, meta):
-    """Eigenvalue gap against Fst."""
-    ax.plot(gap.Fst, gap.gap, '-', color=COLOR_GAP, linewidth=1.1,
-            label='median ratio of first and\nsecond largest eigenvalues')
-    _threshold_lines(ax, meta)
-    ax.set_xscale('log')
-    ax.set_xlabel(r'$F_{ST}$')
-    ax.set_ylabel(r'$\hat\lambda_1\,/\,\hat\lambda_2$')
-    ax.set_title('BBP phase transition')
-    # The two threshold lines are keyed HERE, under B, and not in C -- both panels draw
-    # the same pair, so naming them once is enough, and B is where the eigenvalue
-    # transition they mark is actually read off. Returned for the shared row under the
-    # panels rather than placed in-axes: two long math labels do not fit beside the curve.
-    return ax.get_legend_handles_labels()
+def panel_b(ax, gap, meta):
+    ax.plot(gap.Fst, gap.gap, "-", color=COLOR_GAP, linewidth=1.0)
+    threshold_lines(ax, meta)
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$F_{ST}$")
+    ax.set_ylabel(r"$\hat\lambda_1/\hat\lambda_2$", labelpad=1)
+    return [Line2D([], [], color=COLOR_GAP, label=r"median $\hat\lambda_1/\hat\lambda_2$"),
+            Line2D([], [], color=COLOR_RAW, ls=":", label=r"$F_{ST}^{\,c}$ with $L$"),
+            Line2D([], [], color=COLOR_EFF, ls=":",
+                   label=r"$F_{ST}^{\,c}$ with $L_{\mathrm{eff}}$")]
 
 
-def panel_C(ax, cos_sweep, meta, summary=None):
-    """
-    Squared cosine similarity against Fst: the fitted measurement against the theory.
-
-    Everything drawn here is READ, not computed. The single_split sweep already fits this
-    exact curve at N = 400 and publishes it in results/sweep_summaries/single_split:
-
-        curves.csv  y_fit with its 95% band (y_lo, y_hi) -- the shared threshold fit
-                    through every replicate, the same model behind every sweep figure
-        theory.csv  cos2_exact / cos2_crude, the prediction per x on the two routes
-        points.csv  the replicate scatter behind the fit
-
-    So this panel is the same measurement and the same theory as figure 3, at one level,
-    rather than a second computation of them that could drift out of agreement. The band is
-    the sweep's own confidence band, which is what makes it a credible interval on the
-    curve rather than a decoration.
-
-    Falls back to the medians in cos_sweep.csv when the summary is unavailable, so the
-    panel still draws without the sweep pipeline.
-    """
-    if summary is not None:
-        curve, theory, pts = summary
-        if pts is not None and len(pts):
-            ax.scatter(pts.x, pts.cos2, s=3, alpha=0.30, linewidths=0,
-                       color=COLOR_MAIN, zorder=1)
-        # Unkeyed: a band hugging its own line reads as the line's uncertainty without
-        # being named, and the key is better spent on the measured/theory contrast.
-        ax.fill_between(curve.x, curve.y_lo, curve.y_hi, color=COLOR_MAIN,
-                        alpha=0.30, linewidth=0, zorder=2)
-        ax.plot(curve.x, curve.y_fit, '-', color=COLOR_MAIN, linewidth=1.1, zorder=3,
-                label='I-Spline fit to\nobserved similarity')
-        # The exact Ding & Yang route, the same one the sweep figures draw against.
-        ax.plot(theory.x, theory.cos2_exact, '--', color='0.35', linewidth=1.0,
-                zorder=4, label='theory')
-    else:
-        d = cos_sweep.sort_values('Fst')
-        ax.plot(d.Fst, d.median_cos.to_numpy(float) ** 2, '-', color=COLOR_MAIN,
-                linewidth=1.5, label='I-Spline fit to\nobserved similarity')
-        ax.plot(d.Fst, d.analytical_cos.to_numpy(float) ** 2, '--', color='0.35',
-                linewidth=1.3, label='theory')
-
-    fit_handles = ax.get_legend_handles_labels()
-    _threshold_lines(ax, meta)          # drawn, but keyed under B
-    ax.set_xscale('log')
-    ax.set_xlabel(r'$F_{ST}$')
-    ax.set_ylabel(r'cosine similarity $\langle\hat v_1, v_1\rangle^2$')
-    ax.set_ylim(-0.04, 1.04)
-    ax.set_title('Eigenvector inconsistency')
-    # Only the fit and the theory. The threshold lines this panel also draws are keyed
-    # under B, so naming them again here would repeat two long entries. Bottom-right, and
-    # pushed PAST the right spine (x=1.16): the fit and theory curves saturate
-    # along the top and their rise cuts through the panel's interior, so a key anchored
-    # inside the axes sat on the lines. The overhang is small enough to stay clear of the
-    # page edge, which bbox_inches="tight" expands to include.
-    # Returned for the row beneath the panels, like A's and B's: two 12 pt entries do not
-    # fit inside a panel this narrow without landing on the curve.
-    return fit_handles
-
-
-def load_sweep_summary(level, sweep='split_vary_N',
-                       summary_dir=SUMMARY_DIR):
-    """
-    The fitted curve, theory and replicate scatter for one level of the single_split sweep.
-
-    Returns (curves, theory, points) filtered to `level`, or None when the summary is
-    absent -- panel C then falls back to the medians it already reads.
-    """
+def load_sweep_summary(level=SWEEP_LEVEL, sweep="split_vary_N", summary_dir=SUMMARY_DIR):
+    """(curve, theory, points) for one level of the single_split sweep, or None."""
     try:
         curve = pd.read_csv(os.path.join(summary_dir, "curves.csv"))
         theory = pd.read_csv(os.path.join(summary_dir, "theory.csv"))
+        points = pd.read_csv(os.path.join(summary_dir, "points.csv"))
     except FileNotFoundError:
         return None
     sel = lambda d: d[(d.sweep == sweep) & (d.level == level)].sort_values("x")
-    curve, theory = sel(curve), sel(theory)
-    if curve.empty or theory.empty:
-        return None
-    try:
-        points = sel(pd.read_csv(os.path.join(summary_dir, "points.csv")))
-    except FileNotFoundError:
-        points = None
-    return curve, theory, points
+    curve, theory, points = sel(curve), sel(theory), sel(points)
+    return None if curve.empty or theory.empty else (curve, theory, points)
 
 
-def add_insets(fig, gs_cell, pc1):
-    """
-    PC1 scatters, one per representative Fst, in the gridspec cell under panel C.
-
-    Laid out as a nested gridspec inside `gs_cell` rather than floated at hand-tuned
-    figure coordinates. The old version placed them with `ax_C.get_position()` offsets
-    measured on the pre-6.5in canvas, so on the narrower page they detached from the row
-    and left a band of empty page; a nested gridspec is measured by the layout engine and
-    tracks whatever height the row is actually given.
-    """
-    # Fixed left-to-right order (small, threshold, large Fst) rather than sorted by value,
-    # since the insets are meant to read as a progression across the sweep.
-    order = ['small', 'threshold', 'large']
-    groups = [pc1[pc1.inset == key] for key in order]
-
-    # A dedicated top row for the shared "PC1 at three Fst values" label, above the insets
-    # rather than below them as an x label: it now names the whole row of three boxes at a
-    # glance instead of reading like a caption for the last (large-Fst) box alone.
-    outer = gs_cell.subgridspec(2, 1, height_ratios=[0.28, 1.0], hspace=0.1)
-    ax_label = fig.add_subplot(outer[0, 0])
-    ax_label.axis("off")
-    # Same size as the legends (LEGEND_PT, not ANNOT_PT) and nudged down from the cell top
-    # so its baseline lines up with "median ratio..." in B's key, which the earlier fixed
-    # top alignment across panels also nudged down (bbox_to_anchor y > 1.0).
-    ax_label.text(0.5, 0.86, r'PC1 at three $F_{ST}$ values',
-                 fontsize=plt.rcParams['legend.fontsize'],
-                 ha='center', va='top', transform=ax_label.transAxes)
-    inner = outer[1, 0].subgridspec(1, 3, wspace=0.28)
-
-    for j, g in enumerate(groups):
-        ax_in = fig.add_subplot(inner[0, j])
-        pc1_vals = g.pc1.values
-        pop = g.population.values
-        rng = np.random.default_rng(j)
-        # A thin jitter band, not the full inset height: these panels show a single PC, and
-        # jitter spread over the whole box reads as a second axis of variation.
-        jitter = rng.uniform(-INSET_JITTER, INSET_JITTER, len(pc1_vals))
-        for p, color in [(0, COLOR_POP1), (1, COLOR_POP2)]:
-            sel = pop == p
-            ax_in.scatter(pc1_vals[sel], jitter[sel], s=1.6, color=color,
-                          alpha=0.75, edgecolors='none')
-        ax_in.set_ylim(-1, 1)
-        ax_in.set_box_aspect(INSET_ASPECT)
-        # A fixed box aspect otherwise centers the axes within its (now taller) cell,
-        # which would push the box down and leave blank space above the title instead of
-        # letting the whole inset+title block sit flush against the cell's top.
-        ax_in.set_anchor('N')
-        ax_in.set_xticks([])
-        ax_in.set_yticks([])
-        # Just the value, not "F_ST = value": three of these sit across one panel's width,
-        # and the repeated symbol made the titles wider than their own boxes and overlap.
-        # The quantity is named once, in the shared row label above (ax_label).
-        ax_in.set_title(rf'${sci_latex(float(g.Fst.iloc[0]), digits=0)}$',
-                        fontsize=ANNOT_PT * 0.85, pad=2)
-        for spine in ax_in.spines.values():
-            spine.set_visible(True)
-            spine.set_linewidth(0.6)
+def panel_c(ax, cos_sweep, meta, summary):
+    if summary is not None:
+        curve, theory, pts = summary
+        ax.scatter(pts.x, pts.cos2, s=1.5, alpha=0.3, linewidths=0, color=COLOR_FIT,
+                   zorder=1, rasterized=True)
+        ax.fill_between(curve.x, curve.y_lo, curve.y_hi, color=COLOR_FIT, alpha=0.3,
+                        linewidth=0, zorder=2)
+        ax.plot(curve.x, curve.y_fit, "-", color=COLOR_FIT, linewidth=1.0, zorder=3)
+        ax.plot(theory.x, theory.cos2_exact, "--", color=COLOR_THEORY, linewidth=1.0, zorder=4)
+    else:
+        d = cos_sweep.sort_values("Fst")
+        ax.plot(d.Fst, d.median_cos ** 2, "-", color=COLOR_FIT)
+        ax.plot(d.Fst, d.analytical_cos ** 2, "--", color=COLOR_THEORY)
+    threshold_lines(ax, meta)
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$F_{ST}$")
+    ax.set_ylabel(r"$\langle\hat v_1, v_1\rangle^2$", labelpad=1)
+    ax.set_ylim(-0.04, 1.04)
+    ax.set_yticks([0, 0.5, 1])
+    ax.set_yticklabels(["0", "0.5", "1"])
+    ax.legend([Line2D([], [], color=COLOR_FIT), Line2D([], [], color=COLOR_THEORY, ls="--")],
+              ["fit", "theory"], loc="lower right", handlelength=1.6,
+              borderaxespad=0.1)
 
 
-def make_figure(analysis_dir=ANALYSIS_DIR, figure_dir=FIGURE_DIR):
-    setup_plotting_style()
-    gap = pd.read_csv(os.path.join(analysis_dir, "gap.csv"))
-    cos_sweep = pd.read_csv(os.path.join(analysis_dir, "cos_sweep.csv"))
-    spectrum = pd.read_csv(os.path.join(analysis_dir, "spectrum.csv"))
-    pc1 = pd.read_csv(os.path.join(analysis_dir, "pc1.csv"))
-    meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).iloc[0]
-
-    fig = plt.figure(figsize=figsize(11.0, 7.6))
-    # Row 1 carries what sits under each panel: A's and B's keys, and C's PC1 insets
-    # (C's own key is in-axes -- see below). Row 2 is unused since C's insets moved up
-    # into row 1 alongside B's key; bbox_inches="tight" trims the resulting blank strip.
-    gs = fig.add_gridspec(3, 3, height_ratios=[4.6, 1.3, 1.1], hspace=0.55, wspace=0.55)
-    ax_A = fig.add_subplot(gs[0, 0])
-    ax_B = fig.add_subplot(gs[0, 1])
-    ax_C = fig.add_subplot(gs[0, 2])
-
-    handles_A = panel_A(ax_A, spectrum, meta)
-    handles_B = panel_B(ax_B, gap, meta)
-    handles_C = panel_C(ax_C, cos_sweep, meta, load_sweep_summary(SWEEP_LEVEL))
-
-    # A's and B's keys go in the row beneath their own panel, on an invisible axes so the
-    # legend is a laid-out artist rather than a floating figure-coordinate annotation.
-    ax_key_A = fig.add_subplot(gs[1, 0])
-    ax_key_A.axis("off")
-    ax_key_A.legend(*handles_A, loc='upper center', frameon=False,
-                    fontsize=plt.rcParams['legend.fontsize'], handlelength=1.3,
-                    labelspacing=0.35, borderaxespad=0.0)
-
-    # B's key label wraps to 2 lines and runs wide enough to crowd A's key at its shared
-    # column boundary -- nudged right of center (bbox_to_anchor x > 0.5) to clear it.
-    ax_key_B = fig.add_subplot(gs[1, 1])
-    ax_key_B.axis("off")
-    ax_key_B.legend(*handles_B, loc='upper center', bbox_to_anchor=(0.62, 1.09),
-                    frameon=False, fontsize=plt.rcParams['legend.fontsize'],
-                    handlelength=1.3, labelspacing=0.35, borderaxespad=0.0)
-
-    # C's key moves in-axes, at the panel's own bottom-right -- the fit and theory curves
-    # saturate along the top and rise through the interior but leave the bottom-right
-    # clear, and an in-axes key needs no space reserved for it in the row below at all.
-    # Shrunk to 7 pt (below the common LEGEND_PT) since it now sits over the data rather
-    # than in reserved whitespace, where the common size would crowd the curves. Pushed
-    # further right than the default corner inset (bbox_to_anchor x > 1) to clear the
-    # curve's rise, which otherwise runs under the key's left edge.
-    ax_C.legend(*handles_C, loc='lower right', bbox_to_anchor=(1.16, 0.0),
-               frameon=False, fontsize=7, handlelength=1.3, labelspacing=0.35,
-               borderaxespad=0.3)
-
-    # C's insets now span rows 1+2 (C's own key no longer needs row-1 space, having moved
-    # in-axes above), grown to fill that combined height so their bottom lands level with
-    # A's key bottom instead of stopping at B's key row alone.
-    gs_C_insets = gs[1:, 2]
-
-    for ax, letter in zip((ax_A, ax_B, ax_C), "ABC"):
-        ax.text(-0.05, 0.95, letter, transform=ax.transAxes + ScaledTranslation(
-            -18 / 72, 22 / 72, fig.dpi_scale_trans),
-            fontsize=PANEL_LETTER_SIZE, fontweight='bold',
-            va='bottom', ha='left')
-
-    # Square panels, set on the axes box rather than left to the figure aspect: the
-    # bottom row (A's and B's keys, C's insets) takes height the figure shape cannot
-    # account for, so at a 6.4 in-tall canvas the three panels came out tall rectangles.
-    for ax in (ax_A, ax_B, ax_C):
-        ax.set_box_aspect(1.0)
-
-    add_insets(fig, gs_C_insets, pc1)
+def add_insets(fig, pc1, x0, width, top):
+    """PC1 scatters at three Fst values, in a row under panel c."""
+    fig.text(x0 / W + width / W / 2, top / H, r"PC1 at three values of $F_{ST}$",
+             ha="center", va="top", fontsize=gs.LEGEND_PT)
+    gap, n = 1.6, 3
+    w = (width - gap * (n - 1)) / n
+    h = 4.6
+    for j, key in enumerate(["small", "threshold", "large"]):
+        g = pc1[pc1.inset == key]
+        ax = gs.axes_mm(fig, x0 + j * (w + gap), top - 6.0 - h, w, h)
+        jit = np.random.default_rng(j).uniform(-INSET_JITTER, INSET_JITTER, len(g))
+        for p, color in [(0, gs.POP1), (1, gs.POP2)]:
+            m = g.population.values == p
+            ax.scatter(g.pc1.values[m], jit[m], s=0.6, color=color, alpha=0.75,
+                       edgecolors="none", rasterized=True)
+        ax.set_ylim(-1, 1)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for s in ax.spines.values():
+            s.set_visible(True)
+            s.set_linewidth(0.5)
+        ax.set_title(rf"${sci_latex(float(g.Fst.iloc[0]), digits=0)}$",
+                     fontsize=gs.TICK_PT, pad=1.5)
 
 
-    out = save_figure(fig, figure_dir, "RMTPhenomena")
+def make_figure(analysis_dir=ANALYSIS_DIR):
+    gs.setup()
+    read = lambda f: pd.read_csv(os.path.join(analysis_dir, f))
+    gap, cos_sweep, spectrum, pc1 = (read(f) for f in
+                                     ("gap.csv", "cos_sweep.csv", "spectrum.csv", "pc1.csv"))
+    meta = read("meta.csv").iloc[0]
+
+    fig = gs.blank_figure(W, H)
+    ax_a, ax_b, ax_c = [gs.axes_mm(fig, x, PANEL_Y, w, PANEL_H) for x, w in PANEL_X]
+    h_a = panel_a(ax_a, spectrum, meta)
+    h_b = panel_b(ax_b, gap, meta)
+    panel_c(ax_c, cos_sweep, meta, load_sweep_summary())
+
+    # keys centred under their panels on one shared row grid; insets centred under c
+    centers = [x + w / 2 for x, w in PANEL_X]
+    gs.grid_key(fig, [h_a, h_b], centers[:2], KEY_TOP + 0.4, pitch_mm=3.0, handlelength=1.6)
+    inset_w = 2 * min(centers[2] - PANEL_X[1][0] - PANEL_X[1][1] - 2.0, W - centers[2] - 0.4)
+    add_insets(fig, pc1, centers[2] - inset_w / 2, inset_w, KEY_TOP)
+
+    for (x, _), letter in zip(PANEL_X, "abc"):
+        gs.label_panel_mm(fig, letter, x - 7.4, H - 0.3)
+    out = gs.save(fig, "RMTPhenomena", "main")
     print(f"wrote {out}")
     return fig
 

@@ -1,6 +1,5 @@
 #!/bin/bash
-#SBATCH --account=pi-jnovembre
-#SBATCH --partition=jnovembre
+# Submit with: python src/slurm_config.py src/analysis/RecentSpatialParticipation.sbatch  (adds account/partition from slurm_config.yaml)
 #SBATCH --job-name=rs_particip
 #SBATCH --time=00:15:00
 #SBATCH --mem=6G

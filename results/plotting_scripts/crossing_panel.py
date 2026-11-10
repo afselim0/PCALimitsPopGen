@@ -539,17 +539,16 @@ def variant_suffix(standardized):
     return "_std" if standardized else ""
 
 
-def pdf_dir_for(figure_dir):
+def png_dir_for(figure_dir):
     """
-    Where the PDF of a figure goes, given where its PNG goes.
+    Where the PNG of a figure goes, given where its PDF goes.
 
-    The two formats are kept in sibling directories -- results/figures holds the PNGs and
-    results/pdf_figs the PDFs -- so a caller that passes results/figures gets that pairing
-    for free. Any other directory keeps both formats together, which is what the test
-    renders under misc/ want.
+    results/figures holds the PDFs (tracked) and its sibling results/png_figures the PNG
+    previews (git-ignored). Any other directory keeps both formats together, which is what
+    the test renders under misc/ want.
     """
     parent, name = os.path.split(os.path.normpath(figure_dir))
-    return os.path.join(parent, "pdf_figs") if name == "figures" else figure_dir
+    return os.path.join(parent, "png_figures") if name == "figures" else figure_dir
 
 
 # Every figure in the paper is written at one size and one resolution, set here rather
@@ -648,7 +647,7 @@ def _scale_rc_text(scale):
 
 def save_figure(fig, figure_dir, stem, standardized=False, dpi=FIGURE_DPI):
     """
-    Write <stem><suffix>.png to figure_dir and the matching .pdf to pdf_dir_for(figure_dir).
+    Write <stem><suffix>.pdf to figure_dir and the matching .png to png_dir_for(figure_dir).
 
     `dpi` sets the PNG's resolution. The PDF takes no dpi: it comes out pure vector (paths
     plus Type 42 fonts, no /Image objects), so it has no resolution to set -- it renders at
@@ -674,12 +673,12 @@ def save_figure(fig, figure_dir, stem, standardized=False, dpi=FIGURE_DPI):
             ax._autotitlepos = False
     name = f"{stem}{variant_suffix(standardized)}"
     os.makedirs(figure_dir, exist_ok=True)
-    png = os.path.join(figure_dir, f"{name}.png")
-    fig.savefig(png, dpi=dpi, bbox_inches="tight")
+    fig.savefig(os.path.join(figure_dir, f"{name}.pdf"), bbox_inches="tight")
 
-    pdf_dir = pdf_dir_for(figure_dir)
-    os.makedirs(pdf_dir, exist_ok=True)
-    fig.savefig(os.path.join(pdf_dir, f"{name}.pdf"), bbox_inches="tight")
+    png_dir = png_dir_for(figure_dir)
+    os.makedirs(png_dir, exist_ok=True)
+    png = os.path.join(png_dir, f"{name}.png")
+    fig.savefig(png, dpi=dpi, bbox_inches="tight")
     return png
 
 

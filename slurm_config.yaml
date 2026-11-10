@@ -1,0 +1,9 @@
+# SLURM settings used by every sbatch script this repository renders or submits.
+#
+# >>> CHANGE THESE to match your own cluster before regenerating results. <<<
+# The defaults below are for the Novembre lab on UChicago's Midway cluster and will not
+# work elsewhere. Run `sinfo` to list partitions and `sacctmgr show assoc user=$USER`
+# to list the accounts you can charge.
+
+account: pi-jnovembre
+partition: jnovembre

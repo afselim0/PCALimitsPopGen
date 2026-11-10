@@ -15,6 +15,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/simulations/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
+from slurm_config import slurm_settings
 from demographies import get_kind
 from resource_estimate import DEFAULT_CPUS, estimate, format_mem, format_time
 
@@ -61,7 +63,7 @@ def render_sbatch(cfg, config_path, outdir, sbatch_outdir=None, verbose=True):
     rendered = template.format(
         job_name=job_name, n_rows_minus_1=n_rows - 1,
         cpus_per_task=cpus, mem=mem, time=time_str,
-        config_path=os.path.abspath(config_path), outdir=outdir)
+        config_path=os.path.abspath(config_path), outdir=outdir, **slurm_settings())
 
     sbatch_outdir = sbatch_outdir or os.path.join(
         os.path.dirname(os.path.dirname(_HERE)), "logs")

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name={job_name}
-#SBATCH --account=pi-jnovembre
-#SBATCH --partition=jnovembre
+#SBATCH --account={account}
+#SBATCH --partition={partition}
 #SBATCH --array=0-{n_rows_minus_1}
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem={mem}

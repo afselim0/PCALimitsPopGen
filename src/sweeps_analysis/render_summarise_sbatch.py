@@ -16,6 +16,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/sweeps_analysis/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
+from slurm_config import slurm_settings
 from cli_common import PROJECT_ROOT
 
 TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -45,7 +47,7 @@ def render(group, sweeps, sbatch_dir, verbose=True):
     with open(TEMPLATE) as f:
         text = f.read()
     text = text.format(group=group, sweep_dirs=" ".join(dirs),
-                       out=os.path.join("results", "sweep_summaries", group))
+                       out=os.path.join("results", "sweep_summaries", group), **slurm_settings())
 
     os.makedirs(sbatch_dir, exist_ok=True)
     path = os.path.join(sbatch_dir, f"sum_{group}.sbatch")

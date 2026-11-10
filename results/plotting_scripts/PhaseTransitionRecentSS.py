@@ -69,7 +69,7 @@ Reads results/sweep_summaries/split_stepping_stone/{curves,crossings,points}.csv
     (sweeps split_ss_vary_N and split_ss_vary_phi)
     results/analysis/RecentSpatialSpectrum/{spectrum,gaps}.csv
     results/analysis/RecentSpatialParticipation/{participation,summary}.csv
-Writes results/figures/PhaseTransitionRecentSS.png and the matching .pdf
+Writes results/figures/PhaseTransitionRecentSS.pdf (and a PNG preview in results/png_figures)
 """
 import os
 

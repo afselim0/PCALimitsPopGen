@@ -211,7 +211,7 @@ def make_figure(df, dimension, outpath):
 
     fig.tight_layout()
     # outpath is a directory + stem rather than a directory, so it is split back apart
-    # to reach the shared writer (PNG to results/figures, PDF to results/pdf_figs).
+    # to reach the shared writer (PDF to results/figures, PNG to results/png_figures).
     out = save_figure(fig, os.path.dirname(outpath), os.path.basename(outpath))
     print(f"wrote {out}")
     return fig

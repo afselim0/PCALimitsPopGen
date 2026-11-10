@@ -11,6 +11,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
+from slurm_config import slurm_settings
 from cli_common import PROJECT_ROOT
 from precompute_coal_times import t_splits
 
@@ -22,7 +24,7 @@ AGG_TEMPLATE = os.path.join(_HERE, "sbatch_coal_times_agg.template")
 def render(simdir, job_name="coal_times", mem="4G", time="01:00:00", outdir=None):
     n = len(t_splits(simdir))
     fields = dict(job_name=job_name, n_tasks_minus_1=n - 1, mem=mem, time=time,
-                  simdir=simdir)
+                  simdir=simdir, **slurm_settings())
     outdir = outdir or os.path.join(PROJECT_ROOT, "slurm_runs", "coal_times")
     os.makedirs(outdir, exist_ok=True)
 

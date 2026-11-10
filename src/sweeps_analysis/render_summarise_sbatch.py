@@ -1,8 +1,9 @@
 #%%
 """
-Render the stage-3 .sbatch files, one per summary group.
+Stage 3: fit every sweep's curves and write results/sweep_summaries/<group>/.
 
-    python src/sweeps_analysis/render_summarise_sbatch.py [--submit]
+    python src/sweeps_analysis/render_summarise_sbatch.py --local    # run here, group by group
+    python src/sweeps_analysis/render_summarise_sbatch.py --submit   # one SLURM job per group
 
 Several sweeps share a summary directory (the two split sweeps land in single_split, and
 so on), so the grouping is a property of the project rather than of any one config, and it
@@ -30,15 +31,33 @@ GROUPS = {
     "stepping_stone_even": ["ss1d_vary_n", "ss2d_vary_n"],
     "stepping_stone_random": ["ss1d_vary_deme_fraction", "ss2d_vary_deme_fraction"],
     "split_stepping_stone": ["split_ss_vary_N", "split_ss_vary_phi"],
-    "stepping_stone_stride": ["ss1d_vary_deme_stride", "ss2d_vary_deme_stride"],
 }
+
+
+def sweep_dirs(sweeps):
+    """The group's sweep directories (repo-relative) that have been aggregated."""
+    return [os.path.join("results", "sweeps", s) for s in sweeps
+            if os.path.exists(os.path.join(PROJECT_ROOT, "results", "sweeps", s,
+                                           "replicates.csv"))]
+
+
+def run_local(group, sweeps, n_jobs=None):
+    """Run summarise.py for one group in this shell."""
+    dirs = sweep_dirs(sweeps)
+    if not dirs:
+        print(f"  {group}: no sweep has replicates.csv yet, skipped")
+        return
+    cmd = [sys.executable, os.path.join("src", "sweeps_analysis", "summarise.py"), *dirs,
+           "--out", os.path.join("results", "sweep_summaries", group)]
+    if n_jobs:
+        cmd += ["--n-jobs", str(n_jobs)]
+    print(f"=== {group} ===", flush=True)
+    subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
 
 
 def render(group, sweeps, sbatch_dir, verbose=True):
     """Write one group's .sbatch; returns its path, or None if no sweep has data yet."""
-    dirs = [os.path.join("results", "sweeps", s) for s in sweeps
-            if os.path.exists(os.path.join(PROJECT_ROOT, "results", "sweeps", s,
-                                           "replicates.csv"))]
+    dirs = sweep_dirs(sweeps)
     if not dirs:
         if verbose:
             print(f"  {group}: no sweep has replicates.csv yet, skipped")
@@ -62,9 +81,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--submit", action="store_true", help="sbatch each rendered file")
+    p.add_argument("--local", action="store_true", help="run summarise.py here instead")
+    p.add_argument("--n-jobs", type=int, default=None, help="processes for --local")
     p.add_argument("--groups", nargs="*", default=sorted(GROUPS),
-                   help="which groups to render (default: all)")
+                   help="which groups to run (default: all)")
     args = p.parse_args()
+
+    if args.local:
+        for g in args.groups:
+            run_local(g, GROUPS[g], args.n_jobs)
+        return
 
     sbatch_dir = os.path.join(PROJECT_ROOT, "slurm_runs", "summarise")
     paths = [q for q in (render(g, GROUPS[g], sbatch_dir) for g in args.groups) if q]

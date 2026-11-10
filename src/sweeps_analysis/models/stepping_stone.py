@@ -98,7 +98,18 @@ def true_axis_restricted(K, dimension, n_per_deme, sampled_demes, K_demes):
     sample_mask = np.repeat(row_mask, n_per_deme)
 
     out = [u[sample_mask] / np.linalg.norm(u[sample_mask]) for u in cols]
-    return np.column_stack(out)
+    V = np.column_stack(out)
+
+    # Re-orthonormalize before returning. principal_cosines is the SVD of
+    # V_theory^T V_sample and is a principal-angle computation ONLY for orthonormal bases;
+    # restricting the full-lattice closed forms to a deme subset destroys the orthogonality
+    # they have on the whole lattice. Under a random fraction at K=9 the two restricted
+    # columns were measured overlapping by up to 0.45, which made the leading "cosine" come
+    # back as exactly 1.0 and depressed the second -- the 2D random-fraction curves then sat
+    # ~0.08 below their own realizable ceiling. The span is unchanged and the comparison was
+    # always a subspace comparison. (1D has one column, so this only fixes a sign, which
+    # principal_cosines takes the absolute value of anyway.)
+    return V if V.shape[1] == 1 else np.linalg.qr(V)[0]
 
 
 def prepare(cfg, sim_row):
@@ -206,15 +217,8 @@ def _stride_axes(ctx, design, sim_row, cfg):
     n[demes] = n_per
 
     nu = strided_structure_eigenvalues(K, M, n_per, p, dimension, Ne=float(sim_row["Ne"]))
+    # true_axis_restricted re-orthonormalizes; see the note there.
     V_theory = true_axis_restricted(K, dimension, n_per, demes, K_demes)
-    # principal_cosines is the SVD of V_theory^T V_sample and needs an ORTHONORMAL basis;
-    # restricting the closed forms to a deme subset destroys the orthogonality they have
-    # on the full lattice. At K=9, p=3 the two restricted columns correlate at 0.10, which
-    # would bias the reported cosine, so re-orthonormalize. The span is unchanged, and the
-    # comparison was always a subspace comparison. (1D has one column, so QR only fixes
-    # its sign convention, which principal_cosines takes the absolute value of anyway.)
-    if V_theory.shape[1] > 1:
-        V_theory = np.linalg.qr(V_theory)[0]
 
     return dict(V_theory=V_theory, nu=nu, n=n, n_available=None,
                 indices=list(range(k)), select_by_overlap=False, eps=None,

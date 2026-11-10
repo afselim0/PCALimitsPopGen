@@ -84,7 +84,14 @@ def true_axis_restricted(K, dimension, n_per_deme, sampled_demes, K_demes):
     sample_mask = np.repeat(row_mask, n_per_deme)
 
     out = [u[sample_mask] / np.linalg.norm(u[sample_mask]) for u in cols]
-    return np.column_stack(out)
+    V = np.column_stack(out)
+
+    # Re-orthonormalize: principal_cosines is the SVD of V_theory^T V_sample and is a
+    # principal-angle computation only for orthonormal bases, and restricting the
+    # full-lattice closed forms to a deme subset destroys their orthogonality (measured
+    # overlap up to 0.45 at K=9, phi=0.2). See the note in
+    # src/sweeps_analysis/models/stepping_stone.true_axis_restricted.
+    return V if V.shape[1] == 1 else np.linalg.qr(V)[0]
 
 
 def measure_cell(Z, K, dimension, n_per_deme, phi, L, num_replicates, seed, M):

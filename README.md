@@ -34,15 +34,16 @@ and how to activate the conda environment in a batch job).
 | 1. Simulations | `bash src/simulations/run_all_sims.sh` | `results/simulations/` |
 | 2a. Sweeps | `bash src/sweeps_analysis/run_all_sweeps.sh` | `results/sweeps/` |
 | 2b. Per-figure analyses | `python src/analysis/run_all_analyses.py` | `results/analysis/` |
-| 3. Sweep summaries | `python src/sweeps_analysis/render_summarise_sbatch.py --local` | `results/sweep_summaries/` |
+| 3. Sweep summaries | `python src/sweeps_analysis/render_summarise_sbatch.py --local --n-jobs 8` | `results/sweep_summaries/` |
 | 4. Figures | `bash results/plotting_scripts/make_all_figures.sh` | `results/figures/` |
 
 - Wait for all of step 1 to finish before starting step 2: each sweep runs one task per
   simulation file it finds.
 - Step 1 writes about 800 GB and is the slow part (100 simulations per demography, one
   array task each). Steps 2a and 2b can be submitted together.
-- Step 3 runs on a laptop or login node; use `--submit` instead of `--local` to run it as
-  SLURM jobs.
+- Step 3 needs no cluster but fits every curve with a bootstrap: about 20 minutes per group
+  of sweeps on one core, so give it cores with `--n-jobs`, or use `--submit` instead of
+  `--local` to run it as SLURM jobs.
 - Every submit script takes `--no-submit` to write the `.sbatch` files (under `logs/` and
   `slurm_runs/`) without submitting them.
 

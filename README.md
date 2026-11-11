@@ -41,7 +41,7 @@ and how to activate the conda environment in a batch job).
   simulation file it finds.
 - Step 1 writes about 800 GB and is the slow part (100 simulations per demography, one
   array task each). Steps 2a and 2b can be submitted together.
-- Step 3 needs no cluster but fits every curve with a bootstrap: about 20 minutes per group
+- Step 3 needs no cluster but fits every curve with a bootstrap: 20-45 minutes per group
   of sweeps on one core, so give it cores with `--n-jobs`, or use `--submit` instead of
   `--local` to run it as SLURM jobs.
 - Every submit script takes `--no-submit` to write the `.sbatch` files (under `logs/` and

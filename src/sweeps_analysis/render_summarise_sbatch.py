@@ -26,6 +26,7 @@ TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # group -> the sweeps that make it up.
 GROUPS = {
+    "rmt_phenomena": ["split_rmt_phenomena"],
     "single_split": ["split_vary_N", "split_vary_phi"],
     "african_split": ["african_split_vary_N", "african_split_vary_harmonic_phi"],
     "stepping_stone_even": ["ss1d_vary_n", "ss2d_vary_n"],

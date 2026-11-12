@@ -1,6 +1,4 @@
 # Two-population split: PC1 overlap vs Fst, varying total N at balanced sampling.
-# Matches src/analysis/SingleSplitSweeps.py's vary_N sweep (N = 100..1000, phi = 0.5,
-# L = 2e4), so the two pipelines can be compared row for row.
 model: split
 name: split_vary_N
 simdir: results/simulations/split

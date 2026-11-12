@@ -1,0 +1,26 @@
+# The sample size and SNP count of the RMT phenomena figure (Figure 1). This file is the
+# one place they are set: the sweep below draws the figure's cosine-similarity panel, and
+# src/analysis/RMTPhenomena.py reads N and L from here for the other panels.
+model: split
+name: split_rmt_phenomena
+simdir: results/simulations/split
+
+n_replicates: 8
+seed: 0
+
+fixed:
+  L: 10000
+  L_polymorphic: true
+
+sampling:
+  fixed: {phi: 0.5}
+  vary:
+    param: N
+    values: [800]        # haplotypes (400 individuals)
+
+cluster:
+  job_name: sweep_rmt_phenomena
+  # Measured ~10 min/task at N = 800 (one cell, 8 replicates per simulation).
+  time: "00:40:00"
+  mem: 4G
+  cpus_per_task: 1

@@ -26,8 +26,7 @@ POOL = "--num-replicates 50 --n-workers $SLURM_CPUS_PER_TASK"
 # Resources are ~2-3x the measured usage of the runs behind the manuscript figures.
 JOBS = {
     "EffectiveL": ("EffectiveL.py", 2, "4G", "01:00:00", ()),
-    "SingleSplitSweeps": ("SingleSplitSweeps.py", 1, "24G", "06:00:00", ()),
-    "RMTPhenomena": ("RMTPhenomena.py", 8, "20G", "02:00:00", ("SingleSplitSweeps",)),
+    "RMTPhenomena": ("RMTPhenomena.py", 8, "32G", "01:30:00", ()),
     "SisterEigenvalue": ("SisterEigenvalue.py", 1, "24G", "12:00:00", ()),
     "OOA3Demography": ("OOA3Demography.py", 1, "8G", "00:30:00", ()),
     "SS_EvenSampling_1D": (f"SteppingStoneEvenSampling.py --dimension 1 {POOL}",

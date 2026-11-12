@@ -103,3 +103,9 @@ which scales every SNP to unit variance and drops SNPs below that minor allele f
 the analysed subsample. Configs 11-16 are the standardized counterparts of 01-05 and 07
 (the three `StdPhaseTransition*` supplementary figures). `fixed.L` must not exceed the number
 of SNPs the filter leaves; the task fails with the available count if it does.
+
+**Figure 1 setting.** The sample size and SNP count of `RMTPhenomena` are set in one place,
+`src/sweeps_analysis/configs/17_split_rmt_phenomena.yaml` (`sampling.vary.values` is N in
+haplotypes, `fixed.L` the number of SNPs). The sweep draws the cosine-similarity panel and
+`src/analysis/RMTPhenomena.py` reads the same two values for the other panels, so after
+changing them rerun that sweep, that analysis, and the `rmt_phenomena` summary group.

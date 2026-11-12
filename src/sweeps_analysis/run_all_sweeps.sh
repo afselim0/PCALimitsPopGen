@@ -2,7 +2,7 @@
 # Submit every sweep-analysis config as its own SLURM array job, each followed by a
 # dependent aggregate job. Mirrors src/simulations/run_all_sims.sh.
 #
-#   ./run_all_sweeps.sh                # submit all 16 (plus the stage-0 coalescent array)
+#   ./run_all_sweeps.sh                # submit all 17 (plus the stage-0 coalescent array)
 #   ./run_all_sweeps.sh --no-submit    # render the .sbatch files only
 #
 # Stage 0. The OOA3 configs (03, 04) need results/analysis/coal_times/ populated: a

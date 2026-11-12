@@ -43,9 +43,7 @@ def n_from_phi(N, phi):
     Per-population sample sizes for a total N split at fraction phi.
 
     The smaller population is rounded to at least 1 and the remainder goes to the larger,
-    so sum(n) == N exactly and no cell is degenerate at the small-phi end. Ported verbatim
-    from src/analysis/SingleSplitSweeps.n_from_phi so the two pipelines produce identical
-    designs (and therefore identical subsamples at a shared seed).
+    so sum(n) == N exactly and no cell is degenerate at the small-phi end.
     """
     nA = max(int(round(phi * N)), 1)
     return np.array([nA, N - nA])

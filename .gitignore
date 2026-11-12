@@ -26,6 +26,7 @@ results/analysis/*
 !results/analysis/SteppingStoneRandomDemo/
 results/sweep_summaries/*
 !results/sweep_summaries/single_split/
+!results/sweep_summaries/rmt_phenomena/
 !results/sweep_summaries/african_split/
 !results/sweep_summaries/stepping_stone_even/
 !results/sweep_summaries/stepping_stone_random/

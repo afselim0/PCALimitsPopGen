@@ -1,0 +1,37 @@
+# Standardized counterpart of 01_split_vary_N.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config.
+# Two-population split: PC1 overlap vs Fst, varying total N at balanced sampling.
+# Matches src/analysis/SingleSplitSweeps.py's vary_N sweep (N = 100..1000, phi = 0.5,
+# L = 2e4), so the two pipelines can be compared row for row.
+model: split
+name: split_vary_N_std
+simdir: results/simulations/split
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+fixed:
+  L: 20000
+  # Exact width: L is drawn from the polymorphic columns, so every replicate and every
+  # cell returns exactly this many SNPs and gamma = N/L_eff moves only with N. Verified
+  # feasible -- the least-differentiated simulation leaves 88k polymorphic at the
+  # smallest cell (N=100), against the 20000 requested.
+  L_polymorphic: true
+
+sampling:
+  fixed: {phi: 0.5}
+  vary:
+    param: N
+    values: [100, 200, 400, 800, 1600]
+
+cluster:
+  job_name: sweep_split_N_std
+  # Measured: subsample 20.1 s + eigh 1.6 s at the N=1600 cell, 8 replicates x 5 cells
+  # ~ 5 min/task. The subsample dominates here because the split .npy is 200k columns
+  # wide on a network filesystem, not because of the exact-L path (peak RSS 2.0 G).
+  time: "01:00:00"
+  mem: 4G
+  cpus_per_task: 1

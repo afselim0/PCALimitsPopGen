@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "analysis"))  # src/analysis/
 from pc_recovery import load_simulations, pc_recovery
 from crossing_fit import replicate_rows
+import preprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/sweeps_analysis/
 from cli_common import DEFAULT_N_REPLICATES, DEFAULT_SEED, resolve_path
@@ -55,6 +56,7 @@ def run_one_task(index, cfg, outdir, verbose=True, force=False):
     resubmitted without redoing finished work.
     """
     model = get_model(cfg["model"])
+    preprocess.configure(**cfg.get("preprocess", {}))
     n_replicates = cfg.get("n_replicates", DEFAULT_N_REPLICATES)
     seed = cfg.get("seed", DEFAULT_SEED)
 

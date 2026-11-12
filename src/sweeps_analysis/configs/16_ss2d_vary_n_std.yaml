@@ -1,0 +1,39 @@
+# Standardized counterpart of 07_ss2d_vary_n.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config with L lowered to what the filter leaves.
+# 2D stepping stone, every deme sampled, varying n-per-deme.
+#
+# The first two eigenvalues are exactly degenerate, so no canonical basis exists inside
+# the pair and only the subspace is well defined: k_lead = 2 and the comparison is by
+# principal angles (procrustes-aligned), not per-axis.
+model: stepping_stone
+name: ss2d_vary_n_std
+simdir: results/simulations/stepping_stone_2d/K9
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+# k_lead = 2 here, so the two reductions of the principal cosines genuinely differ:
+# mean(c^2) is the <u_hat, u>^2 the figures label, mean(c)^2 is not (Jensen makes the
+# latter smaller whenever the two axes are recovered unequally). Set for the same reason
+# as in configs 06 and 08.
+squared_cosine: true
+
+fixed:
+  dimension: 2
+  L: 5000
+  L_polymorphic: true   # exact width; 12203 polymorphic at the smallest cell (n=2, N=162)
+
+sampling:
+  fixed: {deme_fraction: 1.0}
+  vary:
+    param: n_per_deme
+    values: [2, 4, 8, 16, 32]
+
+cluster:
+  job_name: sweep_ss2d_n_std
+  time: "00:45:00"   # top level dropped 64 -> 32: N <= 2592, an 8x cut in N^3 work.
+  mem: 4G            # measured eigh 3.3 s and peak RSS 2.0 G at that cell
+  cpus_per_task: 1

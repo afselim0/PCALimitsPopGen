@@ -6,6 +6,8 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
+import preprocess
+
 def center_matrix(X):
     """Double-center a matrix: H @ X @ H, with H = I - (1/n) * 11^T."""
     n = X.shape[0]
@@ -18,6 +20,25 @@ def _off_diagonal_mean(M):
     return M[~np.eye(n, dtype=bool)].mean()
 
 
+def pair_diploid(G):
+    """
+    GRM of diploid individuals from the GRM of their haplotypes, in haplotype coordinates.
+
+    Rows 2i and 2i+1 are the two haplotypes of individual i. Averaging G over each pair of
+    rows and columns is Q G Q with Q the projector onto pair-constant vectors: the non-zero
+    spectrum is that of the 0/1/2-genotype GRM (up to scale) and each eigenvector repeats an
+    individual's value on its two rows. Normalization is inherited from G, so the floor
+    stays where the haploid convention puts it.
+    """
+    if not preprocess.DIPLOID:
+        return G
+    if G.shape[0] % 2:
+        raise ValueError(f"diploid pairing needs an even number of haplotypes, got {G.shape[0]}")
+    half = (G[0::2] + G[1::2]) / 2.0
+    half = (half[:, 0::2] + half[:, 1::2]) / 2.0
+    return np.repeat(np.repeat(half, 2, axis=0), 2, axis=1)
+
+
 def compute_sample_covariance(Z, mean_normalize=True):
     """
     Sample GRM from a binary genotype matrix Z, shape (n, L).
@@ -25,6 +46,8 @@ def compute_sample_covariance(Z, mean_normalize=True):
     Delta_ij = mean squared Hamming distance per locus between samples i, j.
     G = -H @ Delta @ H, optionally rescaled by the off-diagonal mean distance.
     """
+    if preprocess.STANDARDIZE:      # same scale as below: floor at 2; already paired
+        return 2.0 * compute_standardized_covariance(Z)
     n, L = Z.shape
     sq_norms = np.sum(Z ** 2, axis=1)
     Delta = (sq_norms[:, None] + sq_norms[None, :] - 2 * Z @ Z.T) / L
@@ -32,7 +55,7 @@ def compute_sample_covariance(Z, mean_normalize=True):
     G = center_matrix(Delta)
     if mean_normalize:
         G /= (_off_diagonal_mean(Delta) / 2)
-    return G
+    return pair_diploid(G)
 
 
 def compute_standardized_covariance(Z):
@@ -65,7 +88,7 @@ def compute_standardized_covariance(Z):
 
     Zs = Zs - Zs.mean(axis=0, keepdims=True)          # H @ Zs
     G = (Zs @ Zs.T) / L
-    return np.asarray(G, dtype=np.float64) / (np.trace(G) / n)
+    return pair_diploid(np.asarray(G, dtype=np.float64) / (np.trace(G) / n))
 
 
 def compute_expected_covariance(T, mean_normalize=True):

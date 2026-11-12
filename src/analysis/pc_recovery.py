@@ -30,6 +30,7 @@ import pandas as pd
 from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
+import preprocess
 from utils import (compute_sample_covariance, compute_standardized_covariance,
                    compute_F_hat)
 from threshold_and_overlap import (eta_moments, approx_nu_c, approx_overlap,
@@ -151,6 +152,9 @@ def subsample(Z, n, L=None, rng=None, n_available=None, L_polymorphic=False):
         if n_available.sum() != Z.shape[0]:
             raise ValueError(f"n_available sums to {n_available.sum()} but Z has "
                              f"{Z.shape[0]} rows")
+    if preprocess.DIPLOID and np.any(n % 2):
+        raise ValueError(f"diploid pairing needs an even sample size per population, got "
+                         f"{n[n % 2 == 1][:5]}; see preprocess.even")
     if np.any(n > n_available):
         raise ValueError(f"requested {n.max()} samples but only {n_available.min()} are "
                          f"available in the smallest subpopulation")
@@ -163,7 +167,7 @@ def subsample(Z, n, L=None, rng=None, n_available=None, L_polymorphic=False):
         # path costs a full-width row slice; that is the price of an exact output width.
         sub = np.asarray(Z[idx, :], dtype=np.float32)
         freq = sub.mean(axis=0)
-        poly = np.flatnonzero((freq > 0) & (freq < 1))
+        poly = np.flatnonzero(preprocess.keep(freq))
         if len(poly) < L:
             raise ValueError(f"requested L={L} polymorphic SNPs but only {len(poly)} are "
                              f"polymorphic in this subsample of {int(n.sum())} samples")
@@ -177,7 +181,7 @@ def subsample(Z, n, L=None, rng=None, n_available=None, L_polymorphic=False):
     sub = np.asarray(Z[np.ix_(idx, cols)] if isinstance(cols, np.ndarray) else Z[idx][:, cols],
                       dtype=np.float32)
     freq = sub.mean(axis=0)
-    return sub[:, (freq > 0) & (freq < 1)]
+    return sub[:, preprocess.keep(freq)]
 
 
 def effective_L(Z):
@@ -187,9 +191,16 @@ def effective_L(Z):
     The GRM is built from unnormalized genotypes, so column l enters with weight v_l and
     the aspect ratio that governs the bulk is N / L_eff rather than N / L.
     """
+    if preprocess.STANDARDIZE:      # flat locus weights
+        return float(raw_L(Z))
     p = np.asarray(Z, dtype=np.float64).mean(axis=0)
     v = p * (1.0 - p)
-    return float(v.sum() ** 2 / (v ** 2).sum())
+    return preprocess.ploidy() * float(v.sum() ** 2 / (v ** 2).sum())
+
+
+def raw_L(Z):
+    """Number of SNP columns on the haploid-equivalent scale (see preprocess)."""
+    return preprocess.ploidy() * np.asarray(Z).shape[1]
 
 
 def locus_moments(Z):
@@ -204,6 +215,8 @@ def locus_weights(Z):
     moments locus_moments reduces it to, so this is kept alongside rather than derived
     from it.
     """
+    if preprocess.STANDARDIZE:
+        return np.ones(np.asarray(Z).shape[1])
     p = np.asarray(Z, dtype=np.float64).mean(axis=0)
     v = p * (1.0 - p)
     return v[v > 0]
@@ -332,7 +345,7 @@ def sample_eigenvectors(Z, indices, by_magnitude=False, standardize=False,
         return Vsel
     lam = w[order[idx]]
     lam_bulk = (float(w[order[bulk_index]])
-                if bulk_index is not None and bulk_index < len(order) else np.nan)
+                if bulk_index is not None and bulk_index < preprocess.rank(len(order)) else np.nan)
     return Vsel, lam, lam_bulk
 
 
@@ -386,7 +399,7 @@ def eigenvectors_by_overlap(Z, V_theory, standardize=False,
     w_sorted = w[order]
     lam = np.array([w_sorted[k] for k in ranks], dtype=float)
     lam_bulk = (float(w_sorted[bulk_index])
-                if bulk_index is not None and bulk_index < len(w_sorted) else np.nan)
+                if bulk_index is not None and bulk_index < preprocess.rank(len(w_sorted)) else np.nan)
     return Vsel, lam, lam_bulk
 
 
@@ -624,7 +637,7 @@ def pc_recovery(Z, n, V_theory, indices, L=None, num_replicates=20, seed=0, nu=N
         cos_all_std.append(principal_cosines(V_theory, V_s_std))
 
         L_effs.append(effective_L(sub))
-        L_raws.append(sub.shape[1])
+        L_raws.append(raw_L(sub))
         m2, _, dl = locus_moments(sub)
         mu2s.append(m2)
         deltas.append(dl)

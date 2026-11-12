@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "analysis"))  # src/analysis/
 from exact_sister_nu import analytical_nu, exact_sister_nu, pop_coal_times
 from pc_recovery import subsample
+import preprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
@@ -102,6 +103,8 @@ def design_phi(phi1, phi2, N):
     n = np.array([n_o, n_o, 0, 0], dtype=int)
     n[SISTER[0]], n[SISTER[1]] = n1, n2
     n[0] += N - n.sum()          # absorb the rounding residual
+    if preprocess.DIPLOID and n[0] % 2:     # diploid pairing needs even counts
+        n[0], n[1] = n[0] + 1, n[1] - 1
     return n
 
 

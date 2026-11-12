@@ -30,6 +30,7 @@ from scipy.linalg import orthogonal_procrustes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from pc_recovery import load_simulations, subsample, sample_eigenvectors, SIMULATION_ROOT
+import preprocess
 from sweeps import ANALYSIS_ROOT
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -38,9 +39,10 @@ from stepping_stone_grid import (closed_form_eigenvector_1d, closed_form_eigenve
                                  critical_M, num_demes)
 
 DEFAULT_NAME = "SteppingStoneEigenvectorShapes"
-N_PER_DEME = 8                  # the n whose swept M range spans overlap ~0 to ~1 in both 1D and 2D
+N_PER_DEME = 4                  # haplotypes (two diploid individuals): the largest n whose swept
+                                # M range still starts near no structure in 2D
 OVERLAP_SWEEP = "SteppingStoneEvenSampling"   # supplies the measured median_cos per (n, M)
-MID_TARGET = 0.7                # "weak": overlap closest to this
+MID_TARGET = 0.7                # "weak": squared cosine closest to this
 SMOOTH_WINDOW = 5               # rolling-median window over M, to de-noise median_cos
 SEED = 0
 
@@ -61,7 +63,7 @@ def pick_regime_rows(params, dimension, n_per_deme, sweep_name=OVERLAP_SWEEP):
     cos = sweep.median_cos.rolling(SMOOTH_WINDOW, center=True, min_periods=1).median().values
 
     chosen = {"no_structure": int(np.argmin(cos)),
-              "weak": int(np.argmin(np.abs(cos - MID_TARGET))),
+              "weak": int(np.argmin(np.abs(cos ** 2 - MID_TARGET))),
               "strong": 0}   # sorted ascending by M, so row 0 is the lowest simulated M
 
     # The simulation directory holds two sweeps under different naming conventions
@@ -148,7 +150,7 @@ def run(name=DEFAULT_NAME, n_per_deme=N_PER_DEME, L=None, seed=SEED, verbose=Tru
                 print(f"{dimension}D {regime}: simID={row.simID}, M={float(row.M):.4g}, "
                       f"overlap={float(row.median_cos):.3f}")
 
-    pd.concat(pc_rows, ignore_index=True).to_csv(os.path.join(outdir, "pcs.csv"),
+    preprocess.individuals(pd.concat(pc_rows, ignore_index=True)).to_csv(os.path.join(outdir, "pcs.csv"),
                                                  index=False)
     pd.DataFrame(meta_rows).to_csv(os.path.join(outdir, "meta.csv"), index=False)
     if verbose:

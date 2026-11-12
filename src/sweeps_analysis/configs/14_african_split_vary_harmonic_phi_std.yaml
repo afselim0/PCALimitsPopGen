@@ -1,0 +1,41 @@
+# Standardized counterpart of 04_african_split_vary_harmonic_phi.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config with L lowered to what the filter leaves.
+# OOA3 sister pair: PC3 alignment vs Fst, varying the sisters' sampling fractions at fixed N.
+#
+# The total sample size is held at N. A cell takes phi_1 and phi_2 from the list below and
+# assigns N*phi_1 to YRI1, N*phi_2 to YRI2, and N*(1-(phi_1+phi_2))/2 to each of CEU and
+# CHB. Every unordered pair is run, phi_1 = phi_2 included, but not the symmetric
+# duplicates: (a, b) and (b, a) are the same design up to relabelling the sisters, so 4
+# values give 10 cells.
+#
+# The curve level is H, the harmonic mean of phi_1 and phi_2. A harmonic mean is dominated
+# by its smaller argument, so a lopsided pair such as (0.05, 0.20) sits far closer to
+# (0.05, 0.05) than to (0.20, 0.20) -- the extra samples in the larger sister buy little,
+# which is the substantive point of the sweep.
+model: african_split
+name: african_split_vary_harmonic_phi_std
+simdir: results/simulations/african_split
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+fixed:
+  L: 10000
+  L_polymorphic: true   # exact width; >= ~10.9k SNPs pass MAF >= 0.05 at every cell
+
+sampling:
+  fixed: {N: 1000}
+  vary:
+    param: phi_sister_pair
+    values: [0.05, 0.10, 0.20]
+
+cluster:
+  job_name: sweep_ooa3_phi_std
+  # As config 03: the coalescent integration moved to the stage-0 array, leaving 6 cells
+  # (3 values -> 6 unordered pairs) at a flat N=1000.
+  time: "00:30:00"
+  mem: 4G
+  cpus_per_task: 1

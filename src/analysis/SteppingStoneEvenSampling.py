@@ -45,6 +45,8 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from pc_recovery import (load_simulations, pc_recovery, subsample, effective_L,
                          _median_se, SIMULATION_ROOT)
+import preprocess
+from pc_recovery import raw_L
 from crossing_fit import crossings_table, replicate_rows
 from sweeps import ANALYSIS_ROOT
 from utils import compute_sample_covariance
@@ -94,12 +96,14 @@ def measure_eigenvalue(Z, n, L, V_lead, k_lead, rng, L_exact=False):
     vals, vecs = vals[order], vecs[:, order]
 
     K_demes = len(n)
-    floor = float(vals[K_demes - 1:-1].mean())
+    # non-zero bulk only; empty (NaN) when each deme holds a single diploid individual
+    bulk = vals[K_demes - 1:preprocess.rank(len(vals))]
+    floor = float(bulk.mean()) if len(bulk) else np.nan
 
     overlaps = np.abs(vecs.T @ V_lead)          # (N, k_lead)
     picked = [int(np.argmax(overlaps[:, j])) for j in range(k_lead)]
     lam_meas = float(np.mean(vals[picked]))
-    return lam_meas / floor - 1.0, float(effective_L(sub)), sub.shape[1]
+    return lam_meas / floor - 1.0, float(effective_L(sub)), raw_L(sub)
 
 
 def _analyse_cell(path, simID, M, m, Ne, L_row, K, dimension, n_per, L, num_replicates, seed):

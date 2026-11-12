@@ -44,6 +44,7 @@ from scipy.linalg import orthogonal_procrustes
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from pc_recovery import (load_simulations, subsample, sample_eigenvectors,
                          principal_cosines, SIMULATION_ROOT)
+import preprocess
 from sweeps import ANALYSIS_ROOT
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -87,7 +88,10 @@ def n_per_deme_for(K_demes, phi, N_total):
 
     Floor, not round: the cell must never request more samples than were simulated per deme.
     """
-    return max(int(N_total // max(int(round(phi * K_demes)), 1)), 1)
+    n_demes = max(int(round(phi * K_demes)), 1)
+    if preprocess.DIPLOID:              # as models/stepping_stone.fraction_n_per_deme
+        return preprocess.nearest_usable(N_total / n_demes)
+    return max(int(N_total // n_demes), 1)
 
 
 def pick_m_row(params, dimension, sweep_name=SWEEP_NAME):
@@ -208,7 +212,7 @@ def run(name=DEFAULT_NAME, n_total=None, phi_values=PHI_VALUES, L=None,
 
     pd.concat(deme_rows, ignore_index=True).to_csv(
         os.path.join(outdir, "sampled_demes.csv"), index=False)
-    pd.concat(pc_rows, ignore_index=True).to_csv(
+    preprocess.individuals(pd.concat(pc_rows, ignore_index=True)).to_csv(
         os.path.join(outdir, "pcs.csv"), index=False)
     pd.DataFrame(meta_rows).to_csv(os.path.join(outdir, "meta.csv"), index=False)
     if verbose:

@@ -45,6 +45,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # src/analysis/
 from pc_recovery import principal_cosines
+import preprocess
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "simulations"))  # src/simulations/
@@ -74,6 +75,8 @@ M_REF = 1.0
 def n_per_deme_for(K, phi, dimension, N_total):
     """n-per-deme spreading N_total over the demes a fraction phi retains (configs 06/08)."""
     n_demes = max(int(round(float(phi) * num_demes(K, dimension))), 1)
+    if preprocess.DIPLOID:              # as models/stepping_stone.fraction_n_per_deme
+        return preprocess.nearest_usable(N_total / n_demes)
     return max(int(N_total // n_demes), 1)
 
 

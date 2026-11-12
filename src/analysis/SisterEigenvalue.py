@@ -78,6 +78,8 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from pc_recovery import load_simulations, subsample, effective_L, SIMULATION_ROOT
+import preprocess
+from pc_recovery import raw_L
 from exact_sister_nu import cached_coal_times, exact_sister_nu, analytical_nu
 from sweeps import ANALYSIS_ROOT
 from utils import compute_sample_covariance
@@ -170,21 +172,21 @@ def measure(Z, n, L, rng, K=len(POPS)):
     order = np.argsort(vals)[::-1]
     vals, vecs = vals[order], vecs[:, order]
 
-    floor = float(vals[K - 1:-1].mean())
+    floor = float(vals[K - 1:preprocess.rank(len(vals))].mean())      # non-zero bulk
     k = SISTER_RANK
     overlap = float(np.abs(vecs[:, k] @ sister_axis(n)))
     return dict(nu_meas=float(vals[k] / floor - 1.0),
                 nu_meas_unnormed=float(vals[k] - 1.0),
                 floor=floor, alpha_meas=float(1.0 / floor - 1.0),
                 overlap=overlap, rank=k,
-                L_eff=effective_L(sub), L_raw=sub.shape[1])
+                L_eff=effective_L(sub), L_raw=raw_L(sub))
 
 
 def _design(n_other, n1, n2):
     """Sample-size vector [CEU, CHB, YRI1, YRI2] from the sister sizes and the others'."""
     n = [n_other, n_other, 0, 0]
     n[SISTER[0]], n[SISTER[1]] = n1, n2
-    return np.array(n, dtype=int)
+    return preprocess.even(np.array(n, dtype=int))
 
 
 def build_designs():

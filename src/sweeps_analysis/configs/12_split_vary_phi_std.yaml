@@ -1,0 +1,29 @@
+# Standardized counterpart of 02_split_vary_phi.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config.
+# Two-population split: PC1 overlap vs Fst, varying the sampling fraction phi at fixed N.
+# Matches src/analysis/SingleSplitSweeps.py's vary_phi sweep (phi = 0.05..0.5, N = 200).
+model: split
+name: split_vary_phi_std
+simdir: results/simulations/split
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+fixed:
+  L: 20000
+  L_polymorphic: true   # exact width; 112k polymorphic available at N=400, well over 20000
+
+sampling:
+  fixed: {N: 400}
+  vary:
+    param: phi
+    values: [0.1,0.2,0.3,0.4,0.5]
+
+cluster:
+  job_name: sweep_split_phi_std
+  time: "00:40:00"   # ~3.5 min/task: 5 cells at a flat N=400
+  mem: 4G
+  cpus_per_task: 1

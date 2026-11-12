@@ -1,0 +1,38 @@
+# Standardized counterpart of 03_african_split_vary_N.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config with L lowered to what the filter leaves.
+# OOA3 sister pair: PC3 alignment vs Fst, varying total N at fixed sister fraction.
+#
+# The expensive config: prepare() runs pop_coal_times, an msprime numerical integration
+# per population pair, ~15-20 min for this task's t_split. That is paid once per array
+# task, which is what the array-over-simulations layout buys.
+model: african_split
+name: african_split_vary_N_std
+simdir: results/simulations/african_split
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+fixed:
+  L: 10000
+  # Exact width, so gamma is fixed across the sweep. 10000 is what the MAF filter can
+  # supply: the tightest OOA3 cell (sisters at 5% each, N=1000) keeps ~10.9k SNPs.
+  L_polymorphic: true
+
+sampling:
+  fixed: {phi_sister: 0.20}
+  vary:
+    param: N
+    values: [100, 200, 400, 800, 1600]
+
+cluster:
+  job_name: sweep_ooa3_N_std
+  # The 15-20 min coalescent integration is no longer paid here -- precompute_coal_times.py
+  # computes it once per t_split as a stage-0 array and prepare() reads the cache. What is
+  # left is 8 replicates x 5 cells of subsample+eigh, measured at 0.8 s + 1.1 s for the
+  # largest (N=1600) cell: under a minute per task.
+  time: "00:30:00"
+  mem: 4G            # measured peak 2.0 G on the N=1600 cell
+  cpus_per_task: 1

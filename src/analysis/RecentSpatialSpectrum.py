@@ -70,6 +70,7 @@ from scipy.stats import spearmanr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
 from utils import compute_F_hat
 from threshold_and_overlap import spectrum_psi
+import preprocess
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIM_CONFIG = os.path.join(_PROJECT_ROOT, "src", "simulations", "configs",
@@ -410,9 +411,12 @@ def cell_spectrum(T, T_eq, K, n_B, phi, L_eff):
     nu_eq, _ = structural_spectrum(T_eq, n_eq)
 
     N = int(n.sum())
-    spectrum = np.concatenate([1.0 + nu, np.ones(max(N - len(nu), 1))])
+    # Rows of the noise: individuals. With diploids the floor has N/2 - K dimensions while
+    # the structure eigenvalues are unchanged, and L_eff here is the true SNP count.
+    N_rows = N // preprocess.ploidy()
+    spectrum = np.concatenate([1.0 + nu, np.ones(max(N_rows - len(nu), 1))])
     psi_pair = spectrum_psi(i, spectrum, L_eff, degenerate_subspace=True)
-    nu_c = _nu_c_spectrum(nu, i, j, N, L_eff)
+    nu_c = _nu_c_spectrum(nu, i, j, N_rows, L_eff)
 
     return dict(nu=nu, nu_eq=nu_eq, pair=(i, j), pair_cos=pair_cos,
                 pair_p2=pair_p2, a_idx=a_idx,

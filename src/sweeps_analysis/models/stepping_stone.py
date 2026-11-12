@@ -43,6 +43,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 from pc_recovery import (analytical_cosine, effective_L, locus_moments, locus_weights,
                          principal_cosines, procrustes_distance, sample_eigenvectors,
                          subsample)
+import preprocess
+from pc_recovery import raw_L
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # src/
@@ -136,6 +138,8 @@ def fraction_n_per_deme(K, phi, dimension, N_total):
     deme. The realised N is recorded per cell as `N`.
     """
     n_demes = max(int(round(float(phi) * num_demes(K, dimension))), 1)
+    if preprocess.DIPLOID:              # nearest even count, so N stays close to N_total
+        return preprocess.nearest_usable(N_total / n_demes)
     return max(int(N_total // n_demes), 1)
 
 
@@ -347,7 +351,7 @@ def cell_replicates(ctx, design, sim_row, cfg, Z, n_replicates, seed):
         cos_all_std.append(principal_cosines(V_theory, V_s_std))
 
         L_effs.append(effective_L(sub))
-        L_raws.append(sub.shape[1])
+        L_raws.append(raw_L(sub))
         # The locus heteroskedasticity the exact threshold/overlap route needs. Recorded
         # here as pc_recovery does on the even-sampling path; without it this path could
         # only ever reach the flat fallback.

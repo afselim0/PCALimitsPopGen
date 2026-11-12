@@ -44,6 +44,8 @@ from crossing_fit import crossings_table, replicate_rows
 from pc_recovery import (load_simulations, subsample, sample_eigenvectors,
                          principal_cosines, procrustes_distance, effective_L,
                          analytical_cosine, SIMULATION_ROOT)
+import preprocess
+from pc_recovery import raw_L
 from sweeps import ANALYSIS_ROOT
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
@@ -57,7 +59,7 @@ DEFAULT_SEED = 0
 
 PHI_VALUES = [0.2, 0.4, 0.6, 0.8, 1.0]
 N_FIXED_FOR_PHI = 8
-N_VALUES = [2, 4, 6, 7, 16, 32, 64]
+N_VALUES = [2, 4, 6, 8, 16, 32, 64]
 PHI_FIXED_FOR_N = 0.4
 
 
@@ -119,7 +121,7 @@ def measure_cell(Z, K, dimension, n_per_deme, phi, L, num_replicates, seed, M):
         cos_all.append(principal_cosines(V_theory, V_s))
         dists.append(procrustes_distance(V_theory, V_s))
         L_effs.append(effective_L(sub))
-        L_raws.append(sub.shape[1])
+        L_raws.append(raw_L(sub))
 
     cos_all = np.array(cos_all)
     mean_cos = cos_all.mean(axis=1)

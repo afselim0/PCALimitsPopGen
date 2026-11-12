@@ -1,0 +1,31 @@
+# Standardized counterpart of 05_ss1d_vary_n.yaml: unit-variance SNP columns, MAF >= 0.05 in the
+# analysed subsample, gamma = N/L with L the number of SNPs kept. Everything below the
+# preprocess block is that config with L lowered to what the filter leaves.
+# 1D stepping stone, every deme sampled, varying n-per-deme.
+# Matches src/analysis/SteppingStoneEvenSampling.py at dimension 1.
+model: stepping_stone
+name: ss1d_vary_n_std
+simdir: results/simulations/stepping_stone_1d/K25
+
+n_replicates: 8
+seed: 0
+
+preprocess: {standardize: true, maf_min: 0.05}
+
+fixed:
+  dimension: 1
+  L: 6000
+  L_polymorphic: true   # exact width; the smallest cell (n=2, N=50) leaves 11099
+                        # polymorphic columns, clearing the 10000 requested
+
+sampling:
+  fixed: {deme_fraction: 1.0}
+  vary:
+    param: n_per_deme
+    values: [2, 4, 8, 16, 32]
+
+cluster:
+  job_name: sweep_ss1d_n_std
+  time: "00:30:00"   # top level dropped 64 -> 32, so N <= 800 and the N^3 work is 8x less
+  mem: 3G
+  cpus_per_task: 1

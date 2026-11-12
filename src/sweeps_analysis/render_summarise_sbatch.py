@@ -31,6 +31,10 @@ GROUPS = {
     "stepping_stone_even": ["ss1d_vary_n", "ss2d_vary_n"],
     "stepping_stone_random": ["ss1d_vary_deme_fraction", "ss2d_vary_deme_fraction"],
     "split_stepping_stone": ["split_ss_vary_N", "split_ss_vary_phi"],
+    # standardized, MAF >= 0.05 (supplementary figures)
+    "single_split_std": ["split_vary_N_std", "split_vary_phi_std"],
+    "african_split_std": ["african_split_vary_N_std", "african_split_vary_harmonic_phi_std"],
+    "stepping_stone_even_std": ["ss1d_vary_n_std", "ss2d_vary_n_std"],
 }
 
 

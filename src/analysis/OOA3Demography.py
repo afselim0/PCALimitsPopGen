@@ -9,18 +9,18 @@ results/simulations/african_split from a clearly resolved split down to a margin
 For each:
 
     demography   the msprime Demography as a demes.Graph, for demesdraw
-    pc_phi05     sample PC1 (by overlap with the predicted sister axis) at N=1000,
+    pc_phi05     sample PC3 (the rank at which the sister axis appears) at N=1000,
                  L = 70,000 polymorphic SNPs, phi_1 = phi_2 = 0.05 (50 YRI1 + 50 YRI2,
                  remainder split CEU/CHB)
     pc_phi20     the same at phi_1 = phi_2 = 0.20 (200 + 200)
 
-The PC is located by overlap with the predicted sister axis (see SisterEigenvalue.sister_axis)
-rather than by rank: the deep OOA splits carry larger eigenvalues than the recent YRI1/YRI2
-split, so the sister axis is not PC1 of the sample covariance.
+The PC is taken at fixed rank (PC3), not located by overlap with the predicted sister axis:
+the two deep OOA splits carry larger eigenvalues than the recent YRI1/YRI2 split, so the
+sister axis is PC3 whenever it is detectable.
 
 Outputs (results/analysis/OOA3Demography):
     pc1.csv    one row per (Fst, phi, sample): label, t_split, Fst, phi, rank (0-indexed
-               rank of the selected PC), overlap (|cos| against the predicted axis),
+               rank of the PC, always 2), overlap (|cos| against the predicted axis),
                population, pc1
     meta.csv   one row per Fst target: t_split, Fst, simID
 """
@@ -34,7 +34,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # src/
-from pc_recovery import load_simulations, eigenvectors_by_overlap, SIMULATION_ROOT
+from pc_recovery import load_simulations, SIMULATION_ROOT
+import preprocess
 from sweeps import ANALYSIS_ROOT
 
 _spec = importlib.util.spec_from_file_location(
@@ -59,6 +60,7 @@ N_TOTAL = 1000
 # every cell can supply, which keeps L identical across the whole figure.
 N_SNPS = 70_000
 PHI_VALUES = (0.05, 0.20)
+SISTER_RANK = 2      # 0-indexed: the sister axis is PC3
 
 # Two Fst values, chosen as the closest available simIDs to these targets rather than
 # hardcoded indices, since which rows finished simulating can vary run to run.
@@ -84,25 +86,23 @@ def pick_rows(params, targets):
 
 
 def sample_pc1(Z, n, rng, L=N_SNPS):
-    """Sample PC located by overlap with the predicted sister axis, sign-fixed against it.
+    """PC3 of the sample, sign-fixed against the predicted sister axis.
 
     L is drawn from the polymorphic columns of the subsample, so every panel is built on
     exactly the same number of segregating sites regardless of n.
 
-    Returns (pc, rank, overlap): the sign-fixed PC, its 0-indexed rank in the sample
-    spectrum, and |cos| against the predicted axis. The rank is recorded rather than
-    assumed -- the sister axis normally sits at rank 2 (PC3), but at the marginal Fst it
-    need not, and the figure's axis label should follow what was actually selected.
+    The rank is fixed at SISTER_RANK, not searched for by overlap: the two deep OOA splits
+    take PC1 and PC2, so PC3 is where the sister axis appears once it is detectable, and
+    below threshold the panel should show what PC3 actually looks like.
+
+    Returns (pc, rank, overlap): the sign-fixed PC, its 0-indexed rank, and |cos| against
+    the predicted axis.
     """
     from pc_recovery import subsample, sample_eigenvectors
     sub = subsample(Z, n, L, rng, L_polymorphic=True)
     v = sister_axis(n)
-    pc = eigenvectors_by_overlap(sub, v[:, None])[:, 0]
-    overlap = abs(float(pc @ v))
-
-    V = sample_eigenvectors(sub, indices=range(min(10, sub.shape[0])))
-    rank = int(np.argmax(np.abs(V.T @ pc)))
-    return (pc if pc @ v >= 0 else -pc), rank, overlap
+    pc = sample_eigenvectors(sub, indices=[SISTER_RANK])[:, 0]
+    return (pc if pc @ v >= 0 else -pc), SISTER_RANK, abs(float(pc @ v))
 
 
 def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, seed=0, verbose=True):
@@ -132,7 +132,7 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, seed=0, verbose=True):
             if verbose:
                 print(f"  phi={phi:.2f}: PC{rank + 1}, overlap={overlap:.3f}")
 
-    pc1_df = pd.concat(pc_rows, ignore_index=True)
+    pc1_df = preprocess.individuals(pd.concat(pc_rows, ignore_index=True))
     meta = pd.DataFrame(meta_rows)
 
     pc1_df.to_csv(os.path.join(outdir, "pc1.csv"), index=False)

@@ -43,6 +43,7 @@ from scipy.linalg import orthogonal_procrustes
 
 from pc_recovery import (load_simulations, principal_cosines, sample_eigenvectors,
                          subsample, SIMULATION_ROOT)
+import preprocess
 from split_stepping_stone_theory import equilibrium_B_axes, within_B_F_hat
 from sweeps import ANALYSIS_ROOT
 
@@ -188,7 +189,7 @@ def run(simdir=None, t_split=None, Ne_ancestral=None, phi=DEFAULT_PHI,
             label=label, m=m, deme_row=deme_row, deme_col=deme_col,
             pc1=pc[:, 0], pc2=pc[:, 1], pc3=pc[:, 2])))
 
-    pc_df = pd.concat(pc_rows, ignore_index=True)
+    pc_df = preprocess.individuals(pd.concat(pc_rows, ignore_index=True))
     meta = pd.DataFrame(meta_rows)
     pc_df.to_csv(os.path.join(outdir, "pc.csv"), index=False)
     meta.to_csv(os.path.join(outdir, "meta.csv"), index=False)

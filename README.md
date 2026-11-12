@@ -1,13 +1,13 @@
 # PCALimitsPopGen
 
-Code for the manuscript on when PCA reveals population structure, studied with random
+Code for the manuscript on when PCA accurately reveals population structure, studied with random
 matrix theory. This repository regenerates every figure in `results/figures/main` and
 `results/figures/supplement`.
 
 ## Setup
 
 ```bash
-mamba env create -f environment.yml    # or: conda env create -f environment.yml
+conda env create -f environment.yml
 conda activate pca_rmt
 ```
 
@@ -15,19 +15,18 @@ Run every command below from the repository root, inside this environment.
 
 ## Redraw the figures
 
-The small tables the figures are drawn from are committed, so this works on a fresh clone:
+The data the figures are drawn from are committed, so this works on a fresh clone:
 
 ```bash
 bash results/plotting_scripts/make_all_figures.sh
 ```
 
-Each figure has one script, `results/plotting_scripts/<Figure>.py`, which can also be run on
-its own. Text is set in Arial when it is installed (otherwise Liberation Sans or DejaVu Sans).
+Each figure has one script, `results/plotting_scripts/<Figure>.py`, which can also be run on its own.
 
 ## Regenerate everything from scratch
 
-Steps 1 and 2 need a SLURM cluster. First edit `slurm_config.yaml` (account, partition,
-and how to activate the conda environment in a batch job).
+Steps 1 and 2 need a SLURM cluster, since the simulations and sweeps are best run in parallel.
+First edit `slurm_config.yaml` (account, partition, and how to activate the conda environment in a batch job).
 
 | Step | Command | Writes |
 |---|---|---|
@@ -103,9 +102,3 @@ which scales every SNP to unit variance and drops SNPs below that minor allele f
 the analysed subsample. Configs 11-16 are the standardized counterparts of 01-05 and 07
 (the three `StdPhaseTransition*` supplementary figures). `fixed.L` must not exceed the number
 of SNPs the filter leaves; the task fails with the available count if it does.
-
-**Figure 1 setting.** The sample size and SNP count of `RMTPhenomena` are set in one place,
-`src/sweeps_analysis/configs/17_split_rmt_phenomena.yaml` (`sampling.vary.values` is N in
-haplotypes, `fixed.L` the number of SNPs). The sweep draws the cosine-similarity panel and
-`src/analysis/RMTPhenomena.py` reads the same two values for the other panels, so after
-changing them rerun that sweep, that analysis, and the `rmt_phenomena` summary group.

@@ -2,15 +2,15 @@
 """
 Figure 1 (single column): RMT phenomena on a two-population split.
 
-a-c   The spectrum at three Fst values: below, just above and far above the critical
+a     The spectrum at three Fst values: below, just above and far above the critical
       detectability point lambda_c. Bulk eigenvalues (histogram) against the Marchenko-Pastur
-      density with L_eff; the true spike lambda_1 and lambda_c as lines; the largest sample
-      eigenvalue over replicate subsamples as a histogram (on a broken axis in c). The
+      density with L_eff; the true spike lambda_1 = 1 + nu and lambda_c as lines; the largest sample
+      eigenvalue over replicate subsamples as a histogram (on a broken axis at the largest Fst). The
       sketch shows the true axis u_1 and the sample PC u_hat_1 at the angle of the measured
       mean cosine similarity (drawn as a right angle below threshold).
-d     BBP phase transition: lambda_1 / lambda_2 against Fst, with the critical Fst from raw
+b     BBP phase transition: lambda_1 / lambda_2 against Fst, with the critical Fst from raw
       L and from L_eff (dotted).
-e     Eigenvector inconsistency: <u1_hat, u1>^2 against Fst -- the fit, band and exact theory
+c     Eigenvector inconsistency: <u1_hat, u1>^2 against Fst -- the fit, band and exact theory
       of the figure's own sweep -- with PC1 at the same three Fst values underneath.
 
 Reads results/analysis/RMTPhenomena and results/sweep_summaries/rmt_phenomena.
@@ -33,11 +33,11 @@ SUMMARY_DIR = os.path.join(_ROOT, "results", "sweep_summaries", "rmt_phenomena")
 COLOR_RAW, COLOR_EFF = "#E69F00", "#0072B2"   # theory with raw L / with L_eff
 COLOR_GAP = "#AA4499"                         # measured eigenvalue ratio
 COLOR_FIT = "#D55E00"                         # measured cosine similarity
-COLOR_SAMPLE = "#009E73"                      # largest sample eigenvalue / eigenvector (a, b)
+COLOR_SAMPLE = "#009E73"                      # largest sample eigenvalue / eigenvector (a)
 COLOR_CRIT = "#D62728"                        # critical detectability point lambda_c
 COLOR_THEORY = "0.25"
 INSET_JITTER = 0.18
-INSETS = ("small", "threshold", "large")      # the three Fst values of a-c and the PC1 strips
+INSETS = ("small", "threshold", "large")      # the three Fst values of panel a and the PC1 strips
 
 # Layout (mm): three spectra over two panels, across 87.9 mm
 W, H = gs.WIDTH["single"] / gs.MM, 83.5
@@ -128,7 +128,7 @@ def spectrum_frame(top, fst, N):
     """
     g = N / top.groupby("label").L_eff.median()
     lo, edge = (1 - np.sqrt(g.max())) ** 2 - SPECTRUM_PAD, (1 + np.sqrt(g.max())) ** 2
-    reach = [max(N / 2 * fst[k] + 1, d.lam1.max()) for k, d in top.groupby("label")]
+    reach = [max(N / 2 * fst[k] / (1 - fst[k]) + 1, d.lam1.max()) for k, d in top.groupby("label")]
     near = max([r for r in reach if r < edge + (edge - lo)] + [edge]) + SPECTRUM_PAD
     return lo, (TOP_W - SKETCH_W) / (near - lo), edge + SPECTRUM_PAD
 
@@ -146,13 +146,13 @@ def panel_spike(fig, x0, top, bulk, fst, N, frame):
     """
     x_lo, scale, bulk_hi = frame
     g = N / float(top.L_eff.median())
-    nu = N / 2 * fst                             # 2 N phi (1 - phi) Fst at phi = 1/2, as the sweep
+    nu = N / 2 * fst / (1 - fst)                 # 2 N phi (1 - phi) Fst / (1 - Fst) at phi = 1/2, as the sweep
     lam_hat = float(top.lam1.median())
     x_hi = x_lo + TOP_W / scale
     broken = max(1 + nu, top.lam1.max()) > x_hi - SKETCH_W / scale
-    x = np.linspace(x_lo, x_hi, 1500)
-    y = mp_density(x, g)
-    peak = y.max()
+    mp_x = np.linspace((1 - np.sqrt(g)) ** 2, (1 + np.sqrt(g)) ** 2, 1500)   # edge to edge, so it meets the axis
+    mp_y = mp_density(mp_x, g)
+    peak = mp_y.max()
 
     if broken:
         seg1_w = (bulk_hi - x_lo) * scale
@@ -172,7 +172,7 @@ def panel_spike(fig, x0, top, bulk, fst, N, frame):
     ax.set_xlabel(r"eigenvalue $\lambda$", labelpad=1, x=label_x)
     ax.hist(bulk, bins=np.linspace(x_lo, bulk_hi, 70), density=True, color="0.78",
             edgecolor="none")
-    ax.plot(x[y > 0], y[y > 0], "-", color=COLOR_EFF, linewidth=1.0)
+    ax.plot(mp_x, mp_y, "-", color=COLOR_EFF, linewidth=1.0, solid_capstyle="butt")
     # lambda_1_hat over replicates, drawn at the height of the bulk peak
     edges = np.linspace(top.lam1.min() - 0.01, top.lam1.max() + 0.01, 22)
     dens, _ = np.histogram(top.lam1, bins=edges, density=True)
@@ -200,7 +200,7 @@ def panel_spike(fig, x0, top, bulk, fst, N, frame):
 
 
 def spike_key(fig, L_eff):
-    """One-line key for a-c, centred on the page unless that leaves it."""
+    """One-line key for panel a, centred on the page unless that leaves it."""
     handles = [Patch(color="0.78", label="bulk eigenvalues"),
                Line2D([], [], color=COLOR_EFF,
                       label=rf"Marchenko–Pastur ($L_{{\mathrm{{eff}}}}$ = {round(L_eff, -2):,.0f})"),
@@ -260,7 +260,7 @@ def panel_cosine(ax, meta, summary):
 
 
 def add_insets(fig, pc1, x0, width, top):
-    """PC1 scatters at three Fst values, in a row under panel d."""
+    """PC1 scatters at three Fst values, in a row under panel c."""
     fig.text(x0 / W + width / W / 2, top / H, r"PC1 at three values of $F_{ST}$",
              ha="center", va="top", fontsize=gs.LEGEND_PT)
     gap, n = 1.6, 3
@@ -294,10 +294,10 @@ def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR, name="RMTPhe
 
     fig = gs.blank_figure(W, H)
     frame = spectrum_frame(top, spike_meta.Fst, int(meta.N))
-    for x, label, letter in zip(TOP_X, INSETS, "abc"):
+    for x, label in zip(TOP_X, INSETS):
         panel_spike(fig, x, top[top.label == label], bulk[bulk.label == label].eigenvalue,
                     float(spike_meta.loc[label, "Fst"]), int(meta.N), frame)
-        gs.label_panel_mm(fig, letter, x - 3.5, H - 0.3)
+    gs.label_panel_mm(fig, "a", TOP_X[0] - 3.5, H - 0.3)
     # L_eff is stored on the haploid-equivalent scale; the key shows the SNP count itself
     ploidy = float(spike_meta.ploidy.iloc[0]) if "ploidy" in spike_meta else 1.0
     spike_key(fig, float(top.L_eff.median()) / ploidy)
@@ -308,7 +308,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR, name="RMTPhe
     centers = [x + w / 2 for x, w in PANEL_X]
     gs.grid_key(fig, [h_gap], centers[:1], KEY_TOP + 0.4, pitch_mm=3.0, handlelength=1.6)
     add_insets(fig, pc1, centers[1] - 17.0, 34.0, KEY_TOP)
-    for (x, _), letter in zip(PANEL_X, "de"):
+    for (x, _), letter in zip(PANEL_X, "bc"):
         gs.label_panel_mm(fig, letter, x - 9.2, BOT_Y + PANEL_H + 3.2)
     out = gs.save(fig, name, "main")
     print(f"wrote {out}")

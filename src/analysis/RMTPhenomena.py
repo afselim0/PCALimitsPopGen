@@ -5,24 +5,24 @@ Data for the RMT phenomena figure, from the two-population split simulations.
 N haplotypes (N/2 per population, phi = 0.5) and L SNP columns, both read from the figure's
 sweep config, src/sweeps_analysis/configs/17_split_rmt_phenomena.yaml.
 
-    a-c   replicate spectra at three Fst values (the smallest simulated, ABOVE_FACTOR times
+    a     replicate spectra at three Fst values (the smallest simulated, ABOVE_FACTOR times
           the detection threshold, the largest): per replicate the largest sample
           eigenvalue and the squared cosine of PC1 with the true axis, plus the bulk
           eigenvalues of the first SPIKE_BULK_REPS replicates. Each spectrum is rescaled so
           its bulk has mean 1, the Marchenko-Pastur mean.
-    d     the gap lambda_1 / lambda_2 across the Fst sweep, the top two eigenvalues computed
+    b     the gap lambda_1 / lambda_2 across the Fst sweep, the top two eigenvalues computed
           once per Fst -- no replicates.
-    e     PC1 at the same three Fst values. The cosine-similarity curve itself is drawn
+    c     PC1 at the same three Fst values. The cosine-similarity curve itself is drawn
           from results/sweep_summaries/rmt_phenomena, not computed here.
 
 Fst is always the theoretical value from the filename, never re-estimated.
 
 Outputs (results/analysis/RMTPhenomena):
-    spike_top.csv   panels a-c : per replicate lam1, cos2, L_raw, L_eff
-    spike_bulk.csv  panels a-c : bulk eigenvalues of the first replicates
-    spike_meta.csv  panels a-c : the Fst and simID of each
-    gap.csv         panel d: per Fst, lambda_1 / lambda_2, L_raw, L_eff
-    pc1.csv         PC1 coordinates for the three scatters under panel e
+    spike_top.csv   panel a    : per replicate lam1, cos2, L_raw, L_eff
+    spike_bulk.csv  panel a    : bulk eigenvalues of the first replicates
+    spike_meta.csv  panel a    : the Fst and simID of each
+    gap.csv         panel b: per Fst, lambda_1 / lambda_2, L_raw, L_eff
+    pc1.csv         PC1 coordinates for the three scatters under panel c
     meta.csv        one row: N, L_input, the two Fst_c
 """
 import argparse
@@ -146,10 +146,10 @@ def run(simdir=DEFAULT_SIMDIR, name=DEFAULT_NAME, n_total=None, L=None,
     n = [n_total // 2, n_total - n_total // 2]
     outdir = os.path.join(ANALYSIS_ROOT, name)
 
-    # ---- panel d: gap lambda_1 / lambda_2 across the Fst sweep, one pass per Fst.
+    # ---- panel b: gap lambda_1 / lambda_2 across the Fst sweep, one pass per Fst.
     gap_rows = []
     for i, (_, prow) in enumerate(tqdm(list(params.iterrows()), total=len(params),
-                                       disable=not verbose, desc="Fst sweep (panel d)")):
+                                       disable=not verbose, desc="Fst sweep (panel b)")):
         Fst = float(prow["Fst"])
         rng = np.random.default_rng([seed, i])
         sub = subsample_first_L(arrays[i], n, L, rng)

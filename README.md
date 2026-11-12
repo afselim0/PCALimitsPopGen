@@ -1,4 +1,4 @@
-# PCA_RMT
+# PCALimitsPopGen
 
 Code for the manuscript on when PCA reveals population structure, studied with random
 matrix theory. This repository regenerates every figure in `results/figures/main` and

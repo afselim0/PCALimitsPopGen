@@ -316,7 +316,10 @@ def threshold_fit(x, y, n_grid=300, lo_q=0.02, hi_q=0.90, n_basis=DEFAULT_N_BASI
     if best is None:
         return None
     plateau_tested = float(best[3])
-    below_range = plateau_rejected(plateau_tested)
+    # Either the plateau is too high to be a floor, or the no-plateau candidate won outright
+    # (break below every observation). The second case needs the flag too: without it the
+    # bootstrap is free to put interior breaks anywhere and the band balloons.
+    below_range = plateau_rejected(plateau_tested) or bool(best[2] < t.min())
     if below_range:
         best = _profile(t, y, w, grid, n_basis, lam, min_left, min_right, no_plateau=True)
         if best is None:
@@ -462,8 +465,9 @@ def transition_with_ci(fit, edge_frac=0.02):
     `tau_at_edge`  the break sits in the first or last sliver of the swept range, so the
         transition is outside the data and the value is a bound.
 
-    `tau_below_range`  the fitted plateau was too high to be a sub-threshold floor, so the
-        curve is already detecting at the smallest swept x and the transition is BELOW it.
+    `tau_below_range`  the fitted plateau was too high to be a sub-threshold floor, or the
+        best fit had no plateau at all (break below every observation), so the curve is
+        already detecting at the smallest swept x and the transition is BELOW it.
         The value the gate JUDGED is `plateau_tested` -- the constant from the ungated fit.
         `plateau` is the constant of the fit finally used, which for a rejected curve is the
         no-plateau refit's left-edge level and is therefore LOWER, often well under the

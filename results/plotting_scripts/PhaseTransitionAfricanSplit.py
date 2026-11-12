@@ -93,7 +93,7 @@ def panel_demography(ax, t_split):
     ax.set_xticks([DEME_POSITIONS[p] for p in ("CEU", "YRI1", "YRI2", "CHB")])
     ax.set_xticklabels(["CEU", "YRI1", "YRI2", "CHB"], fontsize=gs.TICK_PT)
     ax.tick_params(axis="x", length=0, pad=1.5)
-    ax.set_ylabel("time ago (generations)")
+    ax.set_ylabel("generations ago")
     for line in ax.lines:
         line.set_linewidth(min(line.get_linewidth(), 0.8))
     for coll in ax.collections:

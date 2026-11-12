@@ -269,11 +269,12 @@ def add_insets(fig, pc1, x0, width, top):
     for j, key in enumerate(INSETS):
         g = pc1[pc1.inset == key]
         ax = gs.axes_mm(fig, x0 + j * (w + gap), top - 6.0 - h, w, h)
-        jit = np.random.default_rng(j).uniform(-INSET_JITTER, INSET_JITTER, len(g))
-        for p, color in [(0, gs.POP1), (1, gs.POP2)]:
-            m = g.population.values == p
-            ax.scatter(g.pc1.values[m], jit[m], s=0.6, color=color, alpha=0.75,
-                       edgecolors="none", rasterized=True)
+        rng = np.random.default_rng(j)
+        jit = rng.uniform(-INSET_JITTER, INSET_JITTER, len(g))
+        order = rng.permutation(len(g))          # interleaved, so neither population hides the other
+        colors = np.where(g.population.values == 0, gs.POP1, gs.POP2)
+        ax.scatter(g.pc1.values[order], jit[order], s=0.6, c=list(colors[order]), alpha=0.75,
+                   edgecolors="none", rasterized=True)
         ax.set_ylim(-1, 1)
         ax.set_xticks([])
         ax.set_yticks([])

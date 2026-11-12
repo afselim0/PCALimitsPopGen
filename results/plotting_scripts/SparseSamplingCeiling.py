@@ -58,7 +58,7 @@ def make_figure(summary_dir=SUMMARY_DIR, ceiling_path=CEILING_PATH, target=DEFAU
 
     fig = gs.blank_figure(WIDTH, pair_height(5, WIDTH, AX_H, show_theory=False, n_extra=2))
     _, results = draw_pair(fig, panels, r"$1/M$", WIDTH, AX_H, top_mm=0, show_theory=False,
-                           target=target, ylabel=rf"cosine similarity ${pair}$",
+                           target=target, ylabel=rf"squared cosine similarity ${pair}$",
                            cross_label=rf"${pair}={target:g}$", extra_handles=extra,
                            panel_hook=draw_ceilings)
     print(f"wrote {gs.save(fig, 'SparseSamplingCeiling', 'supplement')}")

@@ -16,7 +16,7 @@ LEFT, GAP, RIGHT = 9.0, 3.0, 1.5      # mm: y-label column, between panels, righ
 TOP = 5.0                             # mm above the axes: L_eff tick row and panel letter
 XAXIS_H = 9.0                         # mm below the axes: tick labels, x label, gap
 LINE_H = 2.75                         # mm per legend line at 6 pt
-YLABEL = r"cosine similarity $\langle \hat u, u\rangle^2$"
+YLABEL = r"squared cosine similarity $\langle \hat u, u\rangle^2$"
 
 
 def curve_key_h():
@@ -92,7 +92,7 @@ def draw_pair(fig, panels, x_label, width_mm, ax_h, top_mm, letters="ab",
                    cmap=p.get("cmap", gs.cm.viridis), target=target, show_legend=False, **kw)
         results.append(res)
         ax.set_xlabel(x_label)
-        ax.set_ylabel(ylabel)
+        ax.set_ylabel(ylabel, y=0.46)      # the full label is as tall as the axis: keep it off the panel letter
         if panel_hook is not None:
             panel_hook(ax, p)
         ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])

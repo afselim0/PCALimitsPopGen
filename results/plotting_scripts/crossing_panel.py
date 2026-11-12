@@ -405,7 +405,7 @@ def crossing_panel(ax, df, level_key, x_key, cmap, cbar_label, target=DEFAULT_TA
     if np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min:
         ax.set_xlim(x_min, x_max)
     ax.set_ylim(-0.04, 1.04)
-    ax.set_ylabel(r"cosine similarity  $\langle \hat u, u\rangle^2$")
+    ax.set_ylabel(r"squared cosine similarity  $\langle \hat u, u\rangle^2$")
 
     sm = cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
@@ -997,7 +997,7 @@ def crossing_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     # No headroom needed: both the measured-threshold row and the L_eff ticks sit on or
     # below the x axis, so the panel spans the data range alone.
     ax.set_ylim(-0.04, 1.04)
-    ax.set_ylabel(r"cosine similarity  $\langle \hat u, u\rangle^2$")
+    ax.set_ylabel(r"squared cosine similarity  $\langle \hat u, u\rangle^2$")
     if show_legend:
         _curve_legend(ax, legend_title if legend_title is not None else cbar_label,
                       legend_loc, ncol=legend_ncol)
@@ -1077,7 +1077,7 @@ def peak_panel_from_summary(ax, curves, crossings, points=None, sweep=None,
     if np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min:
         ax.set_xlim(x_min, x_max)
     ax.set_ylim(-0.04, 1.04)
-    ax.set_ylabel(r"cosine similarity  $\langle \hat u, u\rangle^2$")
+    ax.set_ylabel(r"squared cosine similarity  $\langle \hat u, u\rangle^2$")
     if show_legend:
         _curve_legend(ax, legend_title if legend_title is not None else cbar_label,
                       legend_loc)
@@ -1104,7 +1104,7 @@ def peak_handles(target=DEFAULT_TARGET):
     """
     return [
         Line2D([], [], color="0.35", linewidth=1.1, label="smoothing spline fit"),
-        Line2D([], [], color="0.35", label="maximum cosine similarity", **CROSS_MARKER_KW),
+        Line2D([], [], color="0.35", label="maximum squared cosine similarity", **CROSS_MARKER_KW),
     ]
 
 

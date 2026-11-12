@@ -9,9 +9,9 @@ demography: K=9 (81 demes), Ne_ancestral=10000, Ne_deme=123.4568, Ne_A=10000, t_
 2. Strobeck tau = 2 Ne_deme K^2 = 20000.0000 (conservative case):
    torus      tau in [20000.0000, 20000.0000], max rel dev 9.059e-14
    reflecting tau in [13849.7443, 23142.8298], spread 4.647e-01 (boundary effect, not an error)
-3. M=   10: F_2 vs (K^2/4)R/m  median rel err 0.0689, max 0.1747
-3. M=    1: F_2 vs (K^2/4)R/m  median rel err 0.0845, max 0.3897
-3. M= 0.25: F_2 vs (K^2/4)R/m  median rel err 0.1149, max 0.7438
+3. M=   10: F_2 vs (K^2/4)R/m  median rel err 0.0692, max 0.1795
+3. M=    1: F_2 vs (K^2/4)R/m  median rel err 0.0844, max 0.3942
+3. M= 0.25: F_2 vs (K^2/4)R/m  median rel err 0.1148, max 0.7509
 5. B-B block vs split_stepping_stone_theory._T_B_matrix at M=1: max rel diff 1.806e-12
 6. quadrature: max rel change on doubling n_steps 1.694e-12 (target < 1e-4)
 4. msprime mean_coalescence_time at M=1, K=3 (conventions check; K-independent):
@@ -29,8 +29,8 @@ phi=0.1 (N=3240, n_A=2916):
    measured cos^2 maximum at 1/M = 0.4616
    spatial pair not at leading adjacent indices: 0.0% of M (pair index modes: [(1, 2)])
    min over M of pair-vs-DCT cosine: 0.9791
-   max over M of Psi(spatial pair): 2.3 (detectable iff < 1)
-   min over M of nu_spatial / nu_c: 1.016 (at 1/M = 0.0405); nu_c in [1.941, 4.703]
+   max over M of Psi(spatial pair): 1.155 (detectable iff < 1)
+   min over M of nu_spatial / nu_c: 1.002 (at 1/M = 0.0405); nu_c in [1.374, 4.696]
    equilibrium gap: [0.5064, 0.5536]
 phi=0.5 (N=648, n_A=324):
    relative gap crosses 0.20 at 1/M = 0.5754
@@ -39,8 +39,8 @@ phi=0.5 (N=648, n_A=324):
    measured cos^2 maximum at 1/M = 0.329
    spatial pair not at leading adjacent indices: 0.0% of M (pair index modes: [(1, 2)])
    min over M of pair-vs-DCT cosine: 0.9791
-   max over M of Psi(spatial pair): 0.4533 (detectable iff < 1)
-   min over M of nu_spatial / nu_c: 1.026 (at 1/M = 4.05); nu_c in [0.8897, 5.862]
+   max over M of Psi(spatial pair): 0.3939 (detectable iff < 1)
+   min over M of nu_spatial / nu_c: 1.026 (at 1/M = 4.05); nu_c in [0.7277, 5.861]
    equilibrium gap: [0.5064, 0.5536]
 censoring: spearman(x_k, nu/nu_eq) = +0.1369 (p=3.9e-08, n=1600)
            fit nu/nu_eq = 1 - exp(-a x_k): a = 1.3670, R^2 = 0.8671

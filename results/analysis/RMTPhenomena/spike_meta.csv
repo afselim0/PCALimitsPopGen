@@ -1,0 +1,4 @@
+label,Fst,simID,ploidy
+small,0.0005,Fst5.0000e-04,2
+threshold,0.0011464565001866,Fst1.1465e-03,2
+large,0.025,Fst2.5000e-02,2

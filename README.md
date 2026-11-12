@@ -88,3 +88,18 @@ python src/sweeps_analysis/summarise.py results/sweeps/NAME --out results/sweep_
 The last command fits the curves and writes `curves.csv`, `crossings.csv` and `points.csv`.
 To have a new sweep summarised with the rest, add it to `GROUPS` in
 `src/sweeps_analysis/render_summarise_sbatch.py`.
+
+**Ploidy.** The simulations store haplotypes; analyses pair them into diploid individuals
+before PCA. `preprocess: {diploid: false}` in a sweep config analyses the haplotypes
+themselves. Sample sizes are always counted in haplotypes and must be even per population.
+
+**Standardized genotypes.** Sweeps run on mean-centered genotypes unless the config has
+
+```yaml
+preprocess: {standardize: true, maf_min: 0.05}
+```
+
+which scales every SNP to unit variance and drops SNPs below that minor allele frequency in
+the analysed subsample. Configs 11-16 are the standardized counterparts of 01-05 and 07
+(the three `StdPhaseTransition*` supplementary figures). `fixed.L` must not exceed the number
+of SNPs the filter leaves; the task fails with the available count if it does.

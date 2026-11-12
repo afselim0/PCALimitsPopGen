@@ -49,8 +49,8 @@ def _series_label(d, varied, fixed_cols, note=None):
         return r"$N$, $\tilde\phi$, $F_{ST}$ all varied"
     varied_cols = [varied] if isinstance(varied, str) else list(varied)
     head = "varying " + " & ".join(rf"${NAMES[c]}$" for c in varied_cols)
-    fixed = [rf"${NAMES[c]} = {_fmt(d[c].iloc[0])}$" for c in ["Fst", "N", "H"]
-             if c in fixed_cols]
+    shown = lambda c: gs.individuals(d[c].iloc[0]) if c == "N" else d[c].iloc[0]
+    fixed = [rf"${NAMES[c]} = {_fmt(shown(c))}$" for c in ["Fst", "N", "H"] if c in fixed_cols]
     if note:
         fixed.append(note)
     return f"{head} ({', '.join(fixed)})" if fixed else head
@@ -82,8 +82,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
     ax_a = gs.axes_mm(fig, LEFT, BOTTOM, AX, AX)
     ax_b = gs.axes_mm(fig, LEFT + AX + GAP, BOTTOM, AX, AX)
     panel(ax_a, s, "nu_analytical",
-          r"exact $\nu_3 = \varepsilon_0 + N\tilde\phi\,(\tau/\bar\tau)\,F_{ST}$", [lo, hi])
-    panel(ax_b, s, "nu_pred", r"approximate $\nu_3 = N\tilde\phi F_{ST}$", [lo, hi])
+          r"exact $\nu_3 = \varepsilon_0 + 2N\tilde\phi\,(\tau/\bar\tau)\,F_{ST}$", [lo, hi])
+    panel(ax_b, s, "nu_pred", r"approximate $\nu_3 = 2N\tilde\phi F_{ST}$", [lo, hi])
     for ax in (ax_a, ax_b):
         ax.set_ylabel(r"measured $\nu_3$ (median)")
 

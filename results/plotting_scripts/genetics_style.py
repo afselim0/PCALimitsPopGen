@@ -18,6 +18,8 @@ WIDTH = {"single": 87.9 * MM, "double": 184.3 * MM, "supp": 184.3 * MM}
 MAX_HEIGHT = 200 * MM  # leaves room for the caption on a 241 mm text block
 
 LABEL_PT, TICK_PT, LEGEND_PT, PANEL_PT = 7, 6, 6, 9
+PLOIDY = 2            # tables count haplotypes; every figure labels diploid individuals
+
 
 # Okabe-Ito: distinguishable under the common colour-vision deficiencies
 OKABE_ITO = ["#000000", "#E69F00", "#56B4E9", "#009E73",
@@ -256,3 +258,8 @@ def grid_key(fig, columns, centers_mm, top_mm, pitch_mm=3.0, **kw):
                          bbox_to_anchor=(x0 / W, (top_mm - (i + 0.5) * pitch_mm) / H),
                          **opts)
             fig.legends.append(leg)
+
+
+def individuals(n):
+    """A stored sample count (haplotypes) as the number of individuals it is drawn as."""
+    return n / PLOIDY

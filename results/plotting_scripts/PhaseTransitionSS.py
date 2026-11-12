@@ -22,7 +22,7 @@ def make_figure(summary_dir=SUMMARY_DIR):
     gs.setup()
     curves, crossings, points, theory = load_summary(summary_dir)
     panels = [dict(curves=curves, crossings=crossings, points=points, theory=theory,
-                   sweep=sweep, title=r"$n$ per deme") for sweep, _ in SWEEPS]
+                   sweep=sweep, title=r"$n$ per deme", count=True) for sweep, _ in SWEEPS]
 
     fig = gs.blank_figure(WIDTH, pair_height(5, WIDTH, AX_H))
     _, results = draw_pair(fig, panels, r"$1/M$", WIDTH, AX_H, top_mm=0)

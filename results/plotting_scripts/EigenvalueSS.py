@@ -28,10 +28,10 @@ ANALYSIS_DIR = os.path.join(_PROJECT_ROOT, "results", "analysis", "SteppingStone
 
 W, H = 130, 75
 AX, LEFT, GAP, BOTTOM = 47, 13, 19, 24
-NU1_LABEL = r"$\nu_1 = n\,/\,(4M\sin^2(\pi/2K))$"
+NU1_LABEL = r"$\nu_1 = n\,/\,(2M\sin^2(\pi/2K))$"   # n in individuals
 NUM_M_LEVELS = 5
 MARKERS = ["o", "s", "^", "D", "v"]
-N_PER_DEME = [2, 4, 8, 16, 32]
+N_PER_DEME = [4, 8, 16, 32, 64]     # as stored (haplotypes); one individual has no floor
 MIN_COS = 0.75
 COLORS = gs.seq_colors(len(N_PER_DEME))
 
@@ -97,8 +97,8 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
 
     # n key: colours shared by both panels, centred under the pair of panels
     n_handles = [Line2D([], [], marker="o", linestyle="none", color=c, markersize=3.5,
-                        label=f"{n}") for n, c in zip(N_PER_DEME, COLORS)]
-    fig.legend(handles=n_handles, title="samples per deme $n$", loc="lower center",
+                        label=f"{gs.individuals(n):g}") for n, c in zip(N_PER_DEME, COLORS)]
+    fig.legend(handles=n_handles, title="individuals per deme $n$", loc="lower center",
                bbox_to_anchor=((LEFT + AX + GAP / 2) / W, 0.8 / H), ncol=len(n_handles),
                borderaxespad=0, borderpad=0, handlelength=1.2, handletextpad=0.3,
                columnspacing=1.0)

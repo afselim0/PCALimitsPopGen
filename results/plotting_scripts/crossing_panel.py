@@ -217,15 +217,15 @@ def level_colors(levels, cmap=None):
     """
     One colour per curve, and a formatter for its legend label.
 
-    A sequential colormap is sampled across the levels when one is given, so panels keep
-    the ordered light-to-dark reading that suits an ordered parameter; otherwise the
+    A sequential colormap is sampled across the levels when one is given, darkest for the
+    largest level, so panels keep the ordered reading that suits an ordered parameter; otherwise the
     categorical Okabe-Ito cycle is used.
     """
     levels = list(levels)
     if cmap is not None and len(levels) > 1:
         # Avoid the extreme ends of a sequential map: the palest is invisible on white and
         # the darkest is hard to tell from the next one down.
-        return [cmap(0.12 + 0.76 * i / (len(levels) - 1)) for i in range(len(levels))]
+        return [cmap(0.88 - 0.76 * i / (len(levels) - 1)) for i in range(len(levels))]
     if cmap is not None:
         return [cmap(0.5)]
     return [DISCRETE_COLORS[i % len(DISCRETE_COLORS)] for i in range(len(levels))]

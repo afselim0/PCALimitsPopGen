@@ -32,7 +32,7 @@ MARKER_S = 2.0
 
 # Layout (mm), per block top to bottom: title, schematic, three PC panels
 W = gs.WIDTH["single"] / gs.MM
-PC_X0, PC_W, PC_GAP = 9.5, 21.0, 7.3      # three PC columns
+PC_X0, PC_W, PC_GAP = 11.3, 20.4, 7.3     # three PC columns
 STRIP_H, SQUARE = 7.0, 22.0
 ANNOT_H, XAXIS_H = 6.0, 6.5               # two-line annotation above, ticks + label below
 CHAIN_H, CHAIN_W, GRID = 5.0, 48.0, 15.0  # schematic sizes
@@ -58,7 +58,7 @@ def blank(ax):
 
 def annotate(ax, row, height_mm):
     ax.text(0.5, 1 + 0.6 / height_mm,
-            rf"$M = {fmt_M(row.M)}$" "\n" rf"$\langle\hat u,u\rangle^2 = {row.median_cos:.2f}$",
+            rf"$M = {fmt_M(row.M)}$" "\n" rf"$\langle\hat u,u\rangle^2 = {row.median_cos ** 2:.2f}$",
             transform=ax.transAxes, ha="center", va="bottom", fontsize=gs.TICK_PT,
             linespacing=1.1)
 
@@ -119,7 +119,9 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
     meta = pd.read_csv(os.path.join(analysis_dir, "meta.csv")).set_index(["dimension", "regime"])
     rng = np.random.default_rng(0)
     K1, K2 = (int(meta.loc[(k, REGIMES[0])].K) for k in (1, 2))
-    n1, n2 = (int(meta.loc[(k, REGIMES[0])].n_per_deme) for k in (1, 2))
+    # points per deme as drawn (one per individual)
+    n1, n2 = (int(((pcs.dimension == k) & (pcs.regime == REGIMES[0]) & (pcs.deme == 0)).sum())
+              for k in (1, 2))
 
     fig = gs.blank_figure(W, H)
     pc_x = [PC_X0 + i * (PC_W + PC_GAP) for i in range(3)]
@@ -133,7 +135,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
 
     # a: title, 1D chain, then the three PC1 strips
     top = H
-    title("a", top, rf"1D stepping stones, $K = {K1}$ demes, $n = {n1}$ per deme")
+    title("a", top, rf"1D stepping stones, $K = {K1}$ demes, $n = {n1}$ individuals per deme")
     y = top - TITLE_H - CHAIN_H
     schematic_1d(gs.axes_mm(fig, cx - CHAIN_W / 2, y, CHAIN_W, CHAIN_H), K1, n1)
     y -= ANNOT_H + STRIP_H
@@ -144,7 +146,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
 
     # b: title, 2D grid, then the three PC1-vs-PC2 squares
     top = y - XAXIS_H - 2.5
-    title("b", top, rf"2D stepping stones, ${K2}\times{K2}$ demes, $n = {n2}$ per deme")
+    title("b", top, rf"2D stepping stones, ${K2}\times{K2}$ demes, $n = {n2}$ individuals per deme")
     y = top - TITLE_H - GRID
     schematic_2d(gs.axes_mm(fig, cx - GRID / 2, y, GRID, GRID), K2)
     y -= ANNOT_H + SQUARE

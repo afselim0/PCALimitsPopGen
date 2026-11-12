@@ -6,7 +6,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for fig in RMTPhenomena PhaseTransitionSingleSplit PhaseTransitionAfricanSplit DemoSS \
            PhaseTransitionSS PhaseTransitionRecentSS EffectiveL EigenvalueAfricanSplit \
-           EigenvalueSS DemoRandomSS SparseSamplingCeiling DemoRecentSS; do
+           EigenvalueSS DemoRandomSS SparseSamplingCeiling DemoRecentSS \
+           StdPhaseTransitionSingleSplit StdPhaseTransitionAfricanSplit StdPhaseTransitionSS; do
     echo "=== $fig ==="
     python "$HERE/$fig.py"
 done

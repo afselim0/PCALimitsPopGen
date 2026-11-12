@@ -120,7 +120,7 @@ def panel_pc(ax, d):
     ax.spines["left"].set_visible(False)
     # baseline 1.6 mm above the strip, level with the panel letter beside it
     ax.text(0.5, 1 + 1.6 / STRIP_H, rf"$\phi_1=\phi_2={d.phi.iloc[0]:g}$,  "
-            rf"$\langle\hat u,u\rangle^2={d.overlap.iloc[0]:.2f}$",
+            rf"$\langle\hat u,u\rangle^2={d.overlap.iloc[0] ** 2:.2f}$",
             transform=ax.transAxes, ha="center", va="baseline", fontsize=gs.TICK_PT)
     return int(d["rank"].iloc[0])
 
@@ -151,7 +151,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR, summary_dir=SUMMARY_DIR):
     ax.set_xlabel(f"PC{rank + 1} (YRI1/YRI2 axis)")
 
     panels = [dict(curves=curves, crossings=crossings, points=points, theory=theory,
-                   sweep="african_split_vary_N", title=r"$N$"),
+                   sweep="african_split_vary_N", title=r"$N$", count=True),
               dict(curves=curves, crossings=crossings, points=points, theory=theory,
                    sweep="african_split_vary_harmonic_phi", title=r"$\tilde{\phi}$")]
     _, (res_N, res_H) = draw_pair(fig, panels, r"$F_{ST}$", WIDTH, AX_H, top_mm=TOP_H,

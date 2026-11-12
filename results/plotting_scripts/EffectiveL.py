@@ -51,14 +51,14 @@ def panel_b(ax, summary, colors):
     N_values = np.sort(summary.N.unique())
     L_max = summary.L_requested.max()
     d = summary[summary.L_requested == L_max].sort_values("N")
-    ax.plot(d.N, d.L_eff, "-", color="0.5", linewidth=0.8, zorder=1)
+    ax.plot(gs.individuals(d.N), d.L_eff, "-", color="0.5", linewidth=0.8, zorder=1)
     cmap = dict(zip(N_values, colors))
-    ax.scatter(d.N, d.L_eff, s=12, c=[cmap[n] for n in d.N], zorder=2, linewidths=0)
+    ax.scatter(gs.individuals(d.N), d.L_eff, s=12, c=[cmap[n] for n in d.N], zorder=2, linewidths=0)
     ax.set_ylim(0, d.L_eff.max() * 1.08)
     ax.set_xlim(0, None)
     _thousands(ax, "x")
     _thousands(ax, "y")
-    ax.set_xlabel(r"$N$ (total samples, $\times 10^3$)")
+    ax.set_xlabel(r"$N$ (individuals, $\times 10^3$)")
     ax.set_ylabel(r"$L_{\mathrm{eff}}$ ($\times 10^3$)")
 
 
@@ -76,7 +76,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
 
     handles = [Line2D([], [], color=c, linewidth=1.0, marker="o", markersize=3,
                       markeredgewidth=0) for c in colors]
-    fig.legend(handles, [f"{N:g}" for N in N_values], title=r"$N$ (total samples)",
+    fig.legend(handles, [f"{gs.individuals(N):g}" for N in N_values], title=r"$N$ (individuals)",
                loc="lower center", bbox_to_anchor=((LEFT + AX_W + GAP / 2) / W, 0.5 / H),
                ncol=len(N_values), columnspacing=0.9, handlelength=1.2)
     gs.label_panel_mm(fig, "a", 1, H - 1)

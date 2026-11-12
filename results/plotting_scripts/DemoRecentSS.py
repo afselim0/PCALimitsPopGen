@@ -61,7 +61,7 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
         panel_pc(ax, pc[pc.label == label], K)
         M, cos = float(meta.loc[label, "M"]), float(meta.loc[label, "cos"])
         ax.text(0.5, 1.02, rf"$M = {M:.2g}$" "\n"
-                rf"$\langle\hat u_{{t={t_split:g}}}, u_\infty\rangle^2 = {cos:.2f}$",
+                rf"$\langle\hat u_{{t={t_split:g}}}, u_\infty\rangle^2 = {cos ** 2:.2f}$",
                 transform=ax.transAxes, ha="center", va="bottom", fontsize=gs.LABEL_PT)
         gs.label_panel_mm(fig, letter, x - 10.0, H - 0.5)
     out = gs.save(fig, "DemoRecentSS", "supplement")

@@ -24,7 +24,7 @@ def make_figure(summary_dir=SUMMARY_DIR):
     gs.setup()
     curves, crossings, points, theory = load_summary(summary_dir)
     common = dict(curves=curves, crossings=crossings, points=points, theory=theory)
-    panels = [dict(common, sweep="split_vary_N", title=r"$N$"),
+    panels = [dict(common, sweep="split_vary_N", title=r"$N$", count=True),
               dict(common, sweep="split_vary_phi", title=r"$\phi$")]
 
     fig = gs.blank_figure(WIDTH, pair_height(5, WIDTH, AX_H))

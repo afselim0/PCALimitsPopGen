@@ -131,12 +131,12 @@ def make_figure(analysis_dir=ANALYSIS_DIR):
         for y, d, K, n in ((CH1D_B + CH1D_H + 0.8, d1, K1, n1),
                            (SCH2D_B + SQ + 1.0, d2, K2, n2)):
             _text_mm(fig, xc, y, rf"$\phi = {phi:g}$ ({int(d.sampled.sum())}/{len(d)} demes)"
-                     "\n" rf"$n = {n}$ per deme", ha="center", va="bottom",
+                     "\n" rf"$n = {gs.individuals(n):g}$ per deme", ha="center", va="bottom",
                      linespacing=1.15)
         cos_lab = r"$\langle\hat u_{%g}, u_1\rangle^2 = %.2f$"
-        _text_mm(fig, xc, PC1D_B + PC1D_H + 0.8, cos_lab % (phi, p1["cos"].iloc[0]),
+        _text_mm(fig, xc, PC1D_B + PC1D_H + 0.8, cos_lab % (phi, p1["cos"].iloc[0] ** 2),
                  ha="center", va="bottom")
-        _text_mm(fig, xc, PC2D_B + SQ + 0.8, cos_lab % (phi, p2["cos"].iloc[0]),
+        _text_mm(fig, xc, PC2D_B + SQ + 0.8, cos_lab % (phi, p2["cos"].iloc[0] ** 2),
                  ha="center", va="bottom")
 
     gs.label_panel_mm(fig, "a", 1, H - 1)

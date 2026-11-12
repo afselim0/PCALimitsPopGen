@@ -331,7 +331,8 @@ def make_figure(summary_dir=SUMMARY_DIR):
     res_n = peak_panel_from_summary(ax_b, curves, crossings, points, sweep="split_ss_vary_N",
                                     cmap=gs.cm.viridis, show_legend=False)
     h, l = ax_b.get_legend_handles_labels()
-    gs.row_key(ax_b, h, l, KEY_GAP, title=r"$n$ per deme of B")
+    gs.row_key(ax_b, h, [f"{gs.individuals(float(x)):g}" for x in l], KEY_GAP,
+               title=r"$n$ per deme of B")
     ax_b.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax_b.set_ylabel(rf"$\langle \hat u_{{t={t_split:g}}}, u_\infty\rangle^2$")
 

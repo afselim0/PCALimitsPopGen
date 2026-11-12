@@ -28,20 +28,30 @@ def encoding_key_h(show_theory, n_extra=0):
     return (LINE_H + 0.3) * int(np.ceil(n / 2)) + 1.0
 
 
-def short_level(label):
-    """Two significant figures for non-integer levels (1/15 -> 0.067)."""
-    v = float(label)
-    return label if v == int(v) else f"{v:.2g}"
+def short_level(label, count=False):
+    """Two significant figures for non-integer levels (1/15 -> 0.067); counts in individuals."""
+    v = gs.individuals(float(label)) if count else float(label)
+    return f"{v:.0f}" if v == int(v) else f"{v:.2g}"
 
 
-def encoding_handles(target=DEFAULT_TARGET, show_theory=True, cross=None):
-    """The shared key: threshold column, then target-crossing column (column-major fill)."""
+def encoding_handles(target=DEFAULT_TARGET, show_theory=True, cross=None, crude=True):
+    """The shared key: threshold column, then target-crossing column (column-major fill).
+
+    crude=False drops the L_eff tick entries and names the lines simply "theory".
+    """
     cross = cross or rf"$\langle\hat u,u\rangle^2={target:g}$"
     thr_fit = _ci_handle("s", 2.6, "threshold (I-spline fit)")
     cross_fit = _ci_handle("o", 2.6, f"{cross} (I-spline fit)")
     if not show_theory:
         return [thr_fit, cross_fit]
     grey = "0.35"
+    if not crude:
+        return [
+            Line2D([], [], color=grey, label="threshold (theory)", **THEORY_PICKUP_VLINE_KW),
+            thr_fit,
+            Line2D([], [], color=grey, label=f"{cross} (theory)", **THEORY_VLINE_KW),
+            cross_fit,
+        ]
     return [
         Line2D([], [], color=grey, label="threshold (close approx.)", **THEORY_PICKUP_VLINE_KW),
         Line2D([], [], color=grey, label="threshold (crude approx.)", **TICK_KW["pickup"]),
@@ -59,12 +69,13 @@ def pair_height(n_levels, width_mm, ax_h, show_theory=True, n_extra=0):
 
 def draw_pair(fig, panels, x_label, width_mm, ax_h, top_mm, letters="ab",
               show_theory=True, target=DEFAULT_TARGET, peak=False,
-              ylabel=YLABEL, cross_label=None, extra_handles=(), panel_hook=None):
+              ylabel=YLABEL, cross_label=None, extra_handles=(), panel_hook=None,
+              crude=True):
     """
     Draw two panels whose letter row starts `top_mm` below the figure top.
 
     panels: two dicts with keys curves, crossings, points, theory, sweep, title (curve-key
-    title) and optionally cmap. Returns (axes, per-panel crossing rows).
+    title) and optionally cmap and count (True when the levels are sample counts). Returns (axes, per-panel crossing rows).
     """
     H = fig.get_size_inches()[1] / gs.MM
     w = (width_mm - LEFT - GAP - RIGHT) / 2
@@ -85,8 +96,8 @@ def draw_pair(fig, panels, x_label, width_mm, ax_h, top_mm, letters="ab",
         if panel_hook is not None:
             panel_hook(ax, p)
         ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    entries = [(h, [short_level(x) for x in l])
-               for h, l in (ax.get_legend_handles_labels() for ax in axes)]
+    entries = [(h, [short_level(x, p.get("count", False)) for x in l])
+               for p, (h, l) in zip(panels, (ax.get_legend_handles_labels() for ax in axes))]
     gs.matched_row_keys(axes, entries, XAXIS_H, [p["title"] for p in panels])
     axes[1].set_ylabel("")
     axes[1].tick_params(labelleft=False)
@@ -97,7 +108,7 @@ def draw_pair(fig, panels, x_label, width_mm, ax_h, top_mm, letters="ab",
 
     # Shared mark key: first half (threshold marks) under a, second half under b
     if not peak:
-        handles = encoding_handles(target, show_theory, cross_label) + list(extra_handles)
+        handles = encoding_handles(target, show_theory, cross_label, crude) + list(extra_handles)
         half = int(np.ceil(len(handles) / 2))
         centers = [(a.get_position().x0 + a.get_position().width / 2) * width_mm for a in axes]
         gs.grid_key(fig, [handles[:half], handles[half:]], centers,
